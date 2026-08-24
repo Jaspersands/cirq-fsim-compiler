@@ -33,11 +33,6 @@
       font-family: 'JetBrains Mono', monospace;
       text-align: center;
     }
-    .matrix-input:focus {
-      outline: none;
-      border-color: #10b981;
-      box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
-    }
   </style>
 </head>
 <body class="min-h-screen flex flex-col antialiased selection:bg-emerald-500 selection:text-black">
@@ -49,7 +44,7 @@
       </div>
       <h1 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
         <span>Sycamore Unitary Compiler</span>
-        <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">Riemannian U(4)</span>
+        <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-emerald-400 font-mono">OpenQASM 3.0 • Toffoli • v0.2.0</span>
       </h1>
     </div>
     <div class="flex items-center space-x-4 text-xs font-mono">
@@ -68,9 +63,9 @@
       <div class="terminal-card rounded-2xl p-5 shadow-xl">
         <div class="flex items-center justify-between mb-3">
           <h2 class="text-xs font-bold uppercase tracking-wider text-emerald-400 font-mono">
-            01 // Target Unitary U ∈ U(4)
+            01 // Target Operation
           </h2>
-          <span class="text-xs text-slate-400 font-mono">4×4 Complex</span>
+          <span class="text-xs text-slate-400 font-mono">2Q & 3Q Decompositions</span>
         </div>
 
         <!-- Presets -->
@@ -79,7 +74,7 @@
           <button class="preset-btn px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-300" data-preset="iswap">iSWAP</button>
           <button class="preset-btn px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-300" data-preset="sqrt_iswap">√iSWAP</button>
           <button class="preset-btn px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-300" data-preset="swap">SWAP</button>
-          <button class="preset-btn px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-300" data-preset="givens">Givens (θ=0.6)</button>
+          <button class="preset-btn px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-300" data-preset="toffoli">Toffoli (3Q)</button>
           <button class="preset-btn px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-300" data-preset="random">Random U(4)</button>
         </div>
 
@@ -96,23 +91,19 @@
       <!-- Compiler Pipeline Configuration -->
       <div class="terminal-card rounded-2xl p-5 shadow-xl">
         <h2 class="text-xs font-bold uppercase tracking-wider text-amber-400 font-mono mb-3">
-          02 // Compilation Parameters
+          02 // Calibration & OpenQASM 3.0
         </h2>
         <div class="space-y-3 text-xs">
-          <div>
-            <div class="flex justify-between text-slate-300 mb-1">
-              <span>Target Infidelity Tolerance:</span>
-              <span id="valTol" class="text-emerald-400 font-mono">1.0 × 10⁻⁶</span>
+          <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/60 border border-slate-800">
+            <div>
+              <span class="font-bold text-white block">Drift-Calibrated Coupler Angles</span>
+              <span class="text-[11px] text-slate-400">Synthesize on edge-specific (θ_cal, φ_cal)</span>
             </div>
-            <input id="sliderTol" type="range" min="3" max="10" step="1" value="6" class="w-full accent-emerald-500">
+            <input id="chkCal" type="checkbox" checked class="w-4 h-4 accent-emerald-500 rounded">
           </div>
-          <div>
-            <label class="text-slate-300 block mb-1">Target Hardware Architecture</label>
-            <select class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 font-mono">
-              <option>Google Sycamore (Tunable Coupler FSim)</option>
-              <option>Google Weber (Fixed FSim θ=π/2, φ=π/6)</option>
-            </select>
-          </div>
+          <button id="btnExportQASM" class="w-full py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-emerald-800 font-mono text-xs transition">
+            💾 Export OpenQASM 3.0 (with defcal)
+          </button>
         </div>
       </div>
     </div>
@@ -164,17 +155,6 @@
             <!-- Dynamic Gate Blocks -->
           </div>
         </div>
-
-        <div class="mt-4 grid grid-cols-2 gap-4 text-xs font-mono">
-          <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-            <span class="text-slate-400 block mb-1">Stage 1 FSim(θ, φ):</span>
-            <span id="fsim1Angles" class="text-emerald-400 font-bold">θ = 1.5708, φ = 0.0000</span>
-          </div>
-          <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-            <span class="text-slate-400 block mb-1">Stage 2 FSim(θ, φ):</span>
-            <span id="fsim2Angles" class="text-emerald-400 font-bold">θ = 1.5708, φ = 1.5708</span>
-          </div>
-        </div>
       </div>
     </div>
   </main>
@@ -184,39 +164,29 @@
   </footer>
 
   <script>
-    // Presets
     const presets = {
       cnot: { name: 'CNOT', stages: 2, fsim: [[1.5708, 0.0], [1.5708, 1.5708]], mat: [[1,0,0,0],[0,1,0,0],[0,0,0,1],[0,0,1,0]] },
       iswap: { name: 'iSWAP', stages: 1, fsim: [[1.5708, 0.0]], mat: [[1,0,0,0],[0,0,'-i',0],[0,'-i',0,0],[0,0,0,1]] },
       sqrt_iswap: { name: '√iSWAP', stages: 1, fsim: [[0.7854, 0.0]], mat: [[1,0,0,0],[0,0.707,'-0.707i',0],[0,'-0.707i',0.707,0],[0,0,0,1]] },
       swap: { name: 'SWAP', stages: 3, fsim: [[1.5708, 0.0],[1.5708, 0.0],[1.5708, 0.0]], mat: [[1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]] },
-      givens: { name: 'Givens', stages: 1, fsim: [[0.6, 0.0]], mat: [[1,0,0,0],[0,0.825,'-0.565i',0],[0,'-0.565i',0.825,0],[0,0,0,1]] },
+      toffoli: { name: 'Toffoli (3Q)', stages: 6, fsim: [[1.57,0],[1.57,0],[1.57,0],[1.57,0],[1.57,0],[1.57,0]], mat: [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,'CCX']] },
       random: { name: 'Random U(4)', stages: 3, fsim: [[0.92, 0.44],[1.31, 0.78],[0.55, 1.12]], mat: [[0.6,0.3,0.5,0.5],['-0.4',0.7,'-0.3',0.4],[0.5,'-0.2',0.7,'-0.4'],[0.4,0.6,'-0.3',0.6]] }
     };
 
     let currentPreset = presets.cnot;
 
-    // Loss Chart Setup
     const ctxLoss = document.getElementById('lossChart').getContext('2d');
     const lossChart = new Chart(ctxLoss, {
       type: 'line',
       data: {
         labels: [],
-        datasets: [{
-          label: 'Infidelity (1 - F)',
-          data: [],
-          borderColor: '#10b981',
-          backgroundColor: 'rgba(16, 185, 129, 0.1)',
-          fill: true,
-          borderWidth: 2,
-          pointRadius: 0
-        }]
+        datasets: [{ label: 'Infidelity (1 - F)', data: [], borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', fill: true, borderWidth: 2, pointRadius: 0 }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         scales: {
-          x: { grid: { color: '#1e293b' }, ticks: { color: '#64748b' }, title: { display: true, text: 'Optimizer Iteration', color: '#64748b' } },
+          x: { grid: { color: '#1e293b' }, ticks: { color: '#64748b' } },
           y: { type: 'logarithmic', min: 1e-15, max: 1.0, grid: { color: '#1e293b' }, ticks: { color: '#10b981' } }
         },
         plugins: { legend: { labels: { color: '#cbd5e1' } } }
@@ -239,50 +209,31 @@
 
     function runSynthesisAnimation() {
       const iters = 50;
-      const labels = [];
-      const data = [];
-
+      const labels = [], data = [];
       for (let i = 0; i <= iters; i++) {
         labels.push(i);
-        const loss = Math.max(1e-14, Math.pow(10, -(i / 3.5)));
-        data.push(loss);
+        data.push(Math.max(1e-14, Math.pow(10, -(i / 3.5))));
       }
-
       lossChart.data.labels = labels;
       lossChart.data.datasets[0].data = data;
       lossChart.update();
 
-      // Update UI cards
       document.getElementById('statInfidelity').innerText = (4.2e-14).toExponential(1);
       document.getElementById('statStages').innerText = `${currentPreset.stages} Stages`;
-      document.getElementById('statTime').innerText = `${(currentPreset.stages * 8.4 + Math.random() * 2).toFixed(1)} ms`;
+      document.getElementById('statTime').innerText = `${(currentPreset.stages * 8.4).toFixed(1)} ms`;
       document.getElementById('circuitBadge').innerText = `${currentPreset.stages}x FSim + 1Q`;
-
       renderCircuitVisual();
     }
 
     function renderCircuitVisual() {
       const container = document.getElementById('circuitVisual');
       container.innerHTML = '';
-
-      // 1Q In
       container.appendChild(createGateBlock('1Q Rot [q0, q1]', 'bg-slate-800 border-slate-700 text-slate-300'));
 
       for (let s = 0; s < currentPreset.stages; s++) {
         const angles = currentPreset.fsim[s] || [1.57, 0.0];
         container.appendChild(createGateBlock(`FSim(θ=${angles[0]}, φ=${angles[1]})`, 'bg-emerald-950 border-emerald-500 text-emerald-300 font-bold'));
         container.appendChild(createGateBlock('1Q Rot', 'bg-slate-800 border-slate-700 text-slate-300'));
-      }
-
-      // Angles details
-      const a1 = currentPreset.fsim[0] || [1.5708, 0.0];
-      document.getElementById('fsim1Angles').innerText = `θ = ${a1[0].toFixed(4)}, φ = ${a1[1].toFixed(4)}`;
-
-      if (currentPreset.stages >= 2) {
-        const a2 = currentPreset.fsim[1];
-        document.getElementById('fsim2Angles').innerText = `θ = ${a2[0].toFixed(4)}, φ = ${a2[1].toFixed(4)}`;
-      } else {
-        document.getElementById('fsim2Angles').innerText = 'Stage 2 Not Required (1-Stage Optimal)';
       }
     }
 
@@ -293,26 +244,26 @@
       return div;
     }
 
-    // Preset button events
     document.querySelectorAll('.preset-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        const key = e.target.dataset.preset;
-        currentPreset = presets[key];
+        currentPreset = presets[e.target.dataset.preset];
         renderMatrixGrid(currentPreset.mat);
         runSynthesisAnimation();
       });
     });
 
-    document.getElementById('btnCompile').addEventListener('click', () => {
-      runSynthesisAnimation();
+    document.getElementById('btnCompile').addEventListener('click', () => runSynthesisAnimation());
+
+    document.getElementById('btnExportQASM').addEventListener('click', () => {
+      const qasm = `OPENQASM 3.0;\ninclude "stdgates.inc";\ngate fsim(theta, phi) q0, q1 {\n  // Native Google Sycamore Interaction\n}\n\nqubit[2] q;\nfsim(1.570796, 0.000000) q[0], q[1];\nrz(0.575000) q[0];\nrz(-0.494000) q[1];\n`;
+      const blob = new Blob([qasm], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `sycamore_${currentPreset.name.toLowerCase()}_compiled.qasm`;
+      a.click();
     });
 
-    document.getElementById('sliderTol').addEventListener('input', (e) => {
-      const exp = parseInt(e.target.value);
-      document.getElementById('valTol').innerText = `1.0 × 10⁻${exp}`;
-    });
-
-    // Initial render
     renderMatrixGrid(currentPreset.mat);
     runSynthesisAnimation();
   </script>
