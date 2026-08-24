@@ -5,103 +5,60 @@
 [![Cirq Sycamore](https://img.shields.io/badge/Framework-Cirq%20%7C%20Google%20Quantum%20AI-teal.svg)](https://quantumai.google/cirq)
 [![JAX Auto-Diff](https://img.shields.io/badge/Autodiff-JAX%20Riemannian-red.svg)](https://github.com/google/jax)
 
-> **JAX-accelerated Riemannian optimization on $U(4)$ Lie manifolds for synthesizing minimum-depth native Google Sycamore $\text{FSim}(\theta, \phi)$ circuits, featuring a drop-in `cirq.Transformer` compiler plugin.**
+> **JAX-accelerated Riemannian optimization on $U(4)$ Lie manifolds for synthesizing minimum-depth native Google Sycamore $\text{FSim}(\theta, \phi)$ circuits, featuring hardware calibration drift maps, 3-qubit Toffoli/Fredkin decomposition, and OpenQASM 3.0 export.**
 
 ---
 
-## ⚡ Overview
+## ⚡ Overview & Features (v0.2.0)
 
-Google's superconducting quantum processors (Sycamore, Weber) execute native two-parameter fermionic simulation gates:
-
-$$\text{FSim}(\theta, \phi) = \begin{pmatrix} 1 & 0 & 0 & 0 \\ 0 & \cos\theta & -i\sin\theta & 0 \\ 0 & -i\sin\theta & \cos\theta & 0 \\ 0 & 0 & 0 & e^{-i\phi} \end{pmatrix}$$
-
-Standard quantum circuit transpilers decompose algorithms into CNOTs or CZs, which incur high gate counts and error accumulation when re-compiled to Sycamore.
-
-This compiler implements **differentiable unitary synthesis on $U(4)$**:
-1. Optimizes parameterized 1-, 2-, and 3-stage $\text{FSim}(\theta, \phi) + 1\text{Q}$ sequences.
-2. Directly minimizes the Riemannian Hilbert-Schmidt infidelity loss:
-   $$\mathcal{L}(\mathbf{\Theta}) = 1 - \frac{1}{16} \left| \text{Tr}\left( U_{\text{target}}^\dagger U_{\text{ansatz}}(\mathbf{\Theta}) \right) \right|^2$$
-3. Integrates directly into Cirq via `FSimDecomposerTransformer` and `compile_circuit_to_sycamore_fsim`.
-
----
-
-## 📊 Synthesis Depth & Performance
-
-| Target Gate | Standard CNOT Count | Native FSim Stages | Synthesis Infidelity | Compilation Time |
-|:---:|:---:|:---:|:---:|:---:|
-| **iSWAP** | 2 CNOTs | **1 FSim** | $< 10^{-14}$ | ~15 ms |
-| **Givens Rotation** | 2 CNOTs | **1 FSim** | $< 10^{-14}$ | ~18 ms |
-| **$\sqrt{\text{iSWAP}}$** | 2 CNOTs | **1 FSim** | $< 10^{-14}$ | ~16 ms |
-| **CNOT** | 1 CNOT | **2 FSim** | $< 10^{-12}$ | ~35 ms |
-| **CZ** | 1 CZ | **2 FSim** | $< 10^{-12}$ | ~32 ms |
-| **SWAP** | 3 CNOTs | **3 FSim** | $< 10^{-12}$ | ~45 ms |
-| **Random $U \in U(4)$** | 3 CNOTs | **3 FSim** | $< 10^{-10}$ | ~60 ms |
+- **Differentiable Riemannian Unitary Decomposition**:
+  - Minimizes Riemannian Hilbert-Schmidt infidelity on $U(4)$ down to $< 10^{-12}$.
+  - Auto-selects 1-, 2-, or 3-stage $\text{FSim}(\theta, \phi) + 1\text{Q}$ Euler gate sequences.
+- **Hardware Drift Calibration Mapping (`SycamoreCalibrationMap`)**:
+  - Synthesizes circuits specifically on measured, drift-adjusted coupler parameters $(\theta_{\text{cal}}, \phi_{\text{cal}})$ per physical grid edge.
+- **3-Qubit Unitary Synthesis (`decompose_toffoli_to_sycamore`, `decompose_fredkin_to_sycamore`)**:
+  - Decomposes Toffoli / CCNOT, Fredkin (CSWAP), and 3-qubit QFT into native Sycamore FSim lattices.
+- **OpenQASM 3.0 Exporter (`export_to_openqasm3`)**:
+  - Direct export with `defcal` parameterized pulse annotations.
+- **Batch Multi-Gate Compiler (`BatchFSimCompiler`)**:
+  - Vectorized concurrent synthesis for large-scale multi-qubit circuits.
 
 ---
 
 ## 🚀 Quickstart
-
-### Installation
-
-```bash
-git clone https://github.com/Jaspersands/cirq-fsim-compiler.git
-cd cirq-fsim-compiler
-pip install -e .
-```
-
-### Python API Example
 
 ```python
 import cirq
 from cirq_fsim_compiler import (
     synthesize_unitary_to_fsim,
     compile_circuit_to_sycamore_fsim,
+    decompose_toffoli_to_sycamore,
+    export_to_openqasm3,
+    SycamoreCalibrationMap,
 )
 
-# 1. Synthesize a 4x4 matrix into native FSim angles
+# 1. Synthesize a 4x4 unitary matrix into native FSim angles
 cnot_mat = cirq.unitary(cirq.CNOT)
 result = synthesize_unitary_to_fsim(cnot_mat)
+print(f"Stages: {result.n_stages}, Infidelity: {result.infidelity:.2e}")
 
-print(f"Stages: {result.n_stages}")
-print(f"Infidelity: {result.infidelity:.2e}")
-print(f"FSim Angles (theta, phi): {result.fsim_angles}")
-
-# 2. Transpile an arbitrary multi-qubit Cirq Circuit
+# 2. Decompose 3-Qubit Toffoli Gate
 q = cirq.LineQubit.range(3)
-circuit = cirq.Circuit([
-    cirq.H(q[0]),
-    cirq.CNOT(q[0], q[1]),
-    cirq.SWAP(q[1], q[2]),
-])
+toffoli_circuit = decompose_toffoli_to_sycamore(q[0], q[1], q[2])
+print(toffoli_circuit)
 
-compiled_circuit = compile_circuit_to_sycamore_fsim(circuit)
-print("\nNative Sycamore Circuit:")
-print(compiled_circuit)
+# 3. Export to OpenQASM 3.0
+qasm3 = export_to_openqasm3(toffoli_circuit, file_path="toffoli_sycamore.qasm")
 ```
 
 ---
 
 ## 🧪 Testing & Benchmarks
 
-Run unit tests:
 ```bash
 pytest -v tests/
-```
-
-Run compilation benchmark:
-```bash
 python benchmarks/run_compiler_benchmark.py
 ```
-
----
-
-## 🌐 Interactive Web Showcase
-
-Open `web/index.html` to experience:
-- **In-Browser JAX/WebAssembly Synthesizer**: Input any $4\times 4$ complex matrix or pick presets (CNOT, iSWAP, Fermionic Hop, Random $U(4)$).
-- **Real-Time Gradient Optimization**: Watch loss descend live in browser ($10^0 \to 10^{-14}$).
-- **Interactive SVG Circuit Diagram**: Displays exact numerical $(\theta_k, \phi_k)$ and Euler angles.
-- **Cartan KAK vs Differentiable Compiler Benchmark Metrics**.
 
 ---
 
