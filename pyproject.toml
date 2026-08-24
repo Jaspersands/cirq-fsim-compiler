@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cirq-fsim-compiler"
+version = "0.1.0"
+description = "Native Google Sycamore FSim Compiler via Differentiable Unitary Decomposition in PennyLane & JAX"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "Apache-2.0"}
+authors = [{name = "Jasper Sands"}]
+dependencies = [
+    "numpy>=1.23.0",
+    "scipy>=1.9.0",
+    "cirq>=1.2.0",
+    "jax>=0.4.0",
+    "jaxlib>=0.4.0",
+    "pennylane>=0.35.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black",
+    "flake8",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
