@@ -1,43 +1,42 @@
 """
-High-Throughput Vectorized Batch Compiler for Large Quantum Circuits.
-
-Parallelizes Riemannian unitary synthesis over dozens of 2-qubit gates simultaneously.
+Batch synthesis of many 4×4 unitaries with optional thread parallelism.
 """
 
 from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional, Sequence
+
 import numpy as np
-from typing import List, Sequence, Dict, Any
+
 from .riemannian_optimizer import DifferentiableFSimSynthesizer, DecompositionResult
+from .calibration_map import CouplerCalibration
 
 
 class BatchFSimCompiler:
-    """
-    Compiles a batch of 4x4 unitary operations into native Sycamore FSim sequences.
-    """
-
-    def __init__(self, target_infidelity: float = 1e-5, max_stages: int = 3):
-        self.synthesizer = DifferentiableFSimSynthesizer(target_infidelity=target_infidelity)
-        self.max_stages = max_stages
+    def __init__(self, target_infidelity: float = 1e-5, max_stages: int = 3, n_workers: int = 1,
+                 calibration: Optional[CouplerCalibration] = None, method: str = "euclidean", seed: int = 42):
+        self.synthesizer = DifferentiableFSimSynthesizer(target_infidelity=target_infidelity, seed=seed, method=method)
+        self.max_stages = int(max_stages)
+        self.n_workers = max(1, int(n_workers))
+        self.calibration = calibration
 
     def compile_batch(self, unitaries: Sequence[np.ndarray]) -> List[DecompositionResult]:
-        """Synthesizes a list of 4x4 unitary matrices."""
-        results = []
-        for u in unitaries:
-            res = self.synthesizer.decompose(u, max_stages=self.max_stages)
-            results.append(res)
-        return results
+        fn = lambda u: self.synthesizer.decompose(np.asarray(u), max_stages=self.max_stages, calibration=self.calibration)
+        if self.n_workers == 1:
+            return [fn(u) for u in unitaries]
+        with ThreadPoolExecutor(max_workers=self.n_workers) as pool:
+            return list(pool.map(fn, unitaries))
 
-    def compute_summary_statistics(self, results: Sequence[DecompositionResult]) -> Dict[str, Any]:
-        """Calculates mean depth, total FSim gates, and max infidelity across batch."""
-        total_fsim = sum(r.n_stages for r in results)
-        mean_infidelity = float(np.mean([r.infidelity for r in results]))
-        max_infidelity = float(np.max([r.infidelity for r in results]))
-        success_rate = float(np.mean([1.0 if r.is_success else 0.0 for r in results]))
-
+    @staticmethod
+    def compute_summary_statistics(results: Sequence[DecompositionResult]) -> Dict[str, Any]:
+        stages = [r.n_stages for r in results]
         return {
             "total_unitaries": len(results),
-            "total_fsim_gates": total_fsim,
-            "mean_infidelity": mean_infidelity,
-            "max_infidelity": max_infidelity,
-            "success_rate": success_rate,
+            "total_fsim_gates": int(sum(stages)),
+            "stage_histogram": {k: stages.count(k) for k in (1, 2, 3)},
+            "mean_infidelity": float(np.mean([r.infidelity for r in results])) if results else 0.0,
+            "max_infidelity": float(np.max([r.infidelity for r in results])) if results else 0.0,
+            "success_rate": float(np.mean([1.0 if r.is_success else 0.0 for r in results])) if results else 0.0,
+            "n_native": int(sum(1 for r in results if r.native)),
         }

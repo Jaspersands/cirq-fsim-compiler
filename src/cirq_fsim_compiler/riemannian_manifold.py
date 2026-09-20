@@ -203,7 +203,7 @@ class RiemannianFSimSolver:
         params = np.concatenate([np.array(sq[0]).ravel()] + [np.concatenate([np.asarray(fsim_angles[s]) if self.fixed is None else np.zeros(0), np.array(sq[s + 1]).ravel()]) for s in range(self.n_stages)])
         fid = 1.0 - val
         return DecompositionResult(
-            n_stages=self.n_stages, infidelity=float(val), fidelity=float(min(1.0, fid)), optimal_params=params,
+            n_stages=self.n_stages, infidelity=float(max(0.0, val)), fidelity=float(min(1.0, fid)), optimal_params=params,
             fsim_angles=fsim_angles, single_qubit_angles=sq, synthesized_unitary=U, target_unitary=target,
             is_success=bool(val <= target_infidelity * 10), native=self.fixed is not None, method="riemannian",
             loss_history=hist, n_restarts_used=used,

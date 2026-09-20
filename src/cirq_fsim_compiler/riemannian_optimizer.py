@@ -191,7 +191,7 @@ class DifferentiableFSimSynthesizer:
         fid = process_fidelity(target, u_synth)
         return DecompositionResult(
             n_stages=n_stages,
-            infidelity=float(1.0 - fid),
+            infidelity=float(max(0.0, 1.0 - fid)),
             fidelity=float(min(1.0, fid)),
             optimal_params=np.asarray(best_p),
             fsim_angles=fsim_angles,
