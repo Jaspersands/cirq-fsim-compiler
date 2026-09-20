@@ -1,202 +1,219 @@
 """
-Differentiable Riemannian Unitary Optimizer on SU(4).
+Differentiable synthesis of two-qubit unitaries into FSim + single-qubit layers.
 
-Synthesizes minimum-depth FSim + 1Q sequences approximating arbitrary target unitaries
-using JAX automatic differentiation and multi-start gradient optimization.
+Two solvers share the same loss  L = 1 − |Tr(U_t† U(p))|²/16:
+
+* ``method="euclidean"`` — L-BFGS-B over Euler angles (a chart of the product
+  manifold SU(2)^{2(n+1)} × T^{2n}); analytic JAX gradients, NumPy fallback.
+* ``method="riemannian"`` — gradient descent directly on the SU(2) blocks with
+  Cayley retractions (see :mod:`riemannian_manifold`).
+
+Calibrated mode (``calibration=CouplerCalibration``) freezes every FSim to
+the coupler's measured native angles and searches only the dressing layers,
+returning the minimum number of native applications that reaches the target.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Sequence, Tuple
+
 import numpy as np
 import scipy.optimize
-from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Any
+
+from .unitary_ansatz import FSimCircuitTemplate
+from .calibration_map import CouplerCalibration
 
 try:
     import jax
     import jax.numpy as jnp
+
     jax.config.update("jax_enable_x64", True)
     HAS_JAX = True
-except ImportError:
+except ImportError:  # pragma: no cover
     HAS_JAX = False
     jax = None
     jnp = np
 
-from .unitary_ansatz import FSimCircuitTemplate
-
 
 @dataclass
 class DecompositionResult:
-    """Stores the compilation results of synthesizing a 2-qubit unitary."""
+    """Outcome of synthesising a 4×4 unitary."""
+
     n_stages: int
     infidelity: float
     fidelity: float
     optimal_params: np.ndarray
-    fsim_angles: List[Tuple[float, float]] # [(theta_1, phi_1), (theta_2, phi_2), ...]
-    single_qubit_angles: List[List[Tuple[float, float, float]]] # [[(a0,b0,g0), (a1,b1,g1)], ...]
+    fsim_angles: List[Tuple[float, float]]
+    single_qubit_angles: List[List[Tuple[float, float, float]]]
     synthesized_unitary: np.ndarray
     target_unitary: np.ndarray
     is_success: bool
+    native: bool = False
+    method: str = "euclidean"
+    loss_history: List[float] = field(default_factory=list)
+    n_restarts_used: int = 1
+    calibration: Optional[CouplerCalibration] = None
+
+
+#: FSim (θ, φ) points used to seed the first restarts: CZ-like, √iSWAP, iSWAP, Sycamore.
+SEED_ANGLES: Tuple[Tuple[float, float], ...] = ((0.0, np.pi), (np.pi / 4, 0.0), (np.pi / 2, 0.0), (np.pi / 2, np.pi / 6))
+
+
+def process_fidelity(u: np.ndarray, v: np.ndarray) -> float:
+    return float(abs(np.trace(u.conj().T @ v)) ** 2 / (u.shape[0] ** 2))
 
 
 class DifferentiableFSimSynthesizer:
     """
-    JAX-accelerated unitary decomposer into native Sycamore FSim gates.
+    Parameters
+    ----------
+    target_infidelity : stop as soon as a stage count reaches this
+    seed : restart RNG seed
+    method : ``"euclidean"`` (L-BFGS-B on Euler angles) or ``"riemannian"``
     """
 
-    def __init__(self, target_infidelity: float = 1e-6):
-        self.target_infidelity = target_infidelity
-        self._compiled_templates = {}
+    def __init__(self, target_infidelity: float = 1e-6, seed: int = 42, method: str = "euclidean"):
+        if method not in ("euclidean", "riemannian"):
+            raise ValueError("method must be 'euclidean' or 'riemannian'")
+        self.target_infidelity = float(target_infidelity)
+        self.seed = int(seed)
+        self.method = method
+        self._compiled_templates: Dict = {}
         if HAS_JAX:
-            self._compile_jax_solvers()
+            for n in (1, 2, 3):
+                self._compiled_templates[n] = self._compile(FSimCircuitTemplate(n_stages=n))
 
-    def _compile_jax_solvers(self):
-        def _make_solver(template):
-            def loss_fn(p: jnp.ndarray, u_t: jnp.ndarray) -> jnp.ndarray:
-                u_a = template.evaluate_unitary_jax(p)
-                overlap = jnp.trace(jnp.conjugate(jnp.transpose(u_t)) @ u_a)
-                fid = jnp.real(overlap * jnp.conjugate(overlap)) / 16.0
-                return 1.0 - fid
+    # ----------------------------------------------------------------- #
+    @staticmethod
+    def _compile(template: FSimCircuitTemplate):
+        def loss_fn(p, u_t):
+            u_a = template.evaluate_unitary_jax(p)
+            ov = jnp.trace(jnp.conj(u_t).T @ u_a)
+            return 1.0 - jnp.real(ov * jnp.conj(ov)) / 16.0
 
-            grad_fn = jax.jit(jax.grad(loss_fn))
-            loss_jit = jax.jit(loss_fn)
-            return loss_jit, grad_fn
+        return template, jax.jit(loss_fn), jax.jit(jax.grad(loss_fn))
 
-        for n_stages in [1, 2, 3]:
-            template = FSimCircuitTemplate(n_stages=n_stages)
-            loss_jit, grad_fn = _make_solver(template)
-            self._compiled_templates[n_stages] = (template, loss_jit, grad_fn)
+    def _get_compiled(self, n_stages: int, fixed: Optional[Sequence[Tuple[float, float]]]):
+        key = n_stages if fixed is None else (n_stages, tuple(fixed))
+        if key not in self._compiled_templates:
+            self._compiled_templates[key] = self._compile(FSimCircuitTemplate(n_stages=n_stages, fixed_fsim=fixed))
+        return self._compiled_templates[key]
 
+    @staticmethod
+    def _cost_and_grad_numpy(template: FSimCircuitTemplate, p: np.ndarray, target: np.ndarray, eps: float = 1e-6):
+        def loss(q):
+            return 1.0 - process_fidelity(target, template.evaluate_unitary_np(q))
+
+        base = loss(p)
+        g = np.zeros_like(p)
+        for i in range(len(p)):
+            pp = p.copy(); pp[i] += eps
+            pm = p.copy(); pm[i] -= eps
+            g[i] = (loss(pp) - loss(pm)) / (2 * eps)
+        return base, g
+
+    # ----------------------------------------------------------------- #
     def decompose(
         self,
         target_unitary: np.ndarray,
         max_stages: int = 3,
         n_restarts: int = 4,
-        max_iter: int = 150,
+        max_iter: int = 200,
+        calibration: Optional[CouplerCalibration] = None,
     ) -> DecompositionResult:
-        """
-        Attempts to decompose target_unitary into 1, 2, or 3 FSim stages.
-        Returns the lowest-depth representation achieving the target infidelity.
-        """
+        """Lowest stage count (1..max_stages) reaching ``target_infidelity``; else the best found."""
+        target_unitary = np.asarray(target_unitary, dtype=np.complex128)
         if target_unitary.shape != (4, 4):
             raise ValueError(f"Expected 4x4 matrix, got {target_unitary.shape}")
-
-        best_result = None
-
-        for n_stages in range(1, max_stages + 1):
-            res_stage = self._optimize_stage(target_unitary, n_stages, n_restarts, max_iter)
-            if best_result is None or res_stage.infidelity < best_result.infidelity:
-                best_result = res_stage
-
-            if res_stage.infidelity <= self.target_infidelity:
-                return res_stage
-
-        return best_result
+        best = None
+        for n_stages in range(1, int(max_stages) + 1):
+            fixed = [calibration.angles] * n_stages if calibration is not None else None
+            res = self._optimize_stage(target_unitary, n_stages, n_restarts, max_iter, fixed=fixed)
+            res.calibration = calibration
+            if best is None or res.infidelity < best.infidelity:
+                best = res
+            if res.infidelity <= self.target_infidelity:
+                return res
+        return best
 
     def _optimize_stage(
         self,
-        target_unitary: np.ndarray,
+        target: np.ndarray,
         n_stages: int,
         n_restarts: int,
         max_iter: int,
+        fixed: Optional[Sequence[Tuple[float, float]]] = None,
     ) -> DecompositionResult:
-        template = FSimCircuitTemplate(n_stages=n_stages)
+        if self.method == "riemannian":
+            from .riemannian_manifold import RiemannianFSimSolver
+            solver = RiemannianFSimSolver(n_stages=n_stages, fixed_fsim=fixed, max_iter=max(400, max_iter), seed=self.seed)
+            return solver.solve(target, n_restarts=n_restarts, target_infidelity=self.target_infidelity)
+
+        template = FSimCircuitTemplate(n_stages=n_stages, fixed_fsim=fixed)
         n_params = template.num_params()
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(self.seed)
 
-        best_loss = 1.0
-        best_p = None
+        if HAS_JAX:
+            template, loss_jit, grad_jit = self._get_compiled(n_stages, fixed)
+            u_t = jnp.asarray(target)
 
-        if HAS_JAX and n_stages in self._compiled_templates:
-            _, loss_jit, grad_fn = self._compiled_templates[n_stages]
-            u_t_jax = jnp.array(target_unitary, dtype=jnp.complex128)
-
-            def cost_and_grad(p: np.ndarray) -> Tuple[float, np.ndarray]:
-                p_jax = jnp.array(p, dtype=jnp.float64)
-                val = float(loss_jit(p_jax, u_t_jax))
-                g = np.array(grad_fn(p_jax, u_t_jax), dtype=np.float64)
-                return val, g
+            def cost_and_grad(p):
+                pj = jnp.asarray(p)
+                return float(loss_jit(pj, u_t)), np.asarray(grad_jit(pj, u_t), dtype=float)
         else:
-            def cost_and_grad(p: np.ndarray) -> Tuple[float, np.ndarray]:
-                u_a = template.evaluate_unitary_np(p)
-                overlap = np.trace(target_unitary.conj().T @ u_a)
-                fid = float(np.real(overlap * np.conjugate(overlap)) / 16.0)
-                loss = 1.0 - fid
-                # Numerical gradient
-                dp = 1e-5
-                grad = np.zeros_like(p)
-                for i in range(len(p)):
-                    p_up = p.copy()
-                    p_up[i] += dp
-                    u_up = template.evaluate_unitary_np(p_up)
-                    fid_up = float(np.real(np.trace(target_unitary.conj().T @ u_up) ** 2) / 16.0)
-                    grad[i] = (fid - fid_up) / dp
-                return loss, grad
+            def cost_and_grad(p):
+                return self._cost_and_grad_numpy(template, p, target)
 
-        for r in range(n_restarts):
+        best_loss, best_p, best_hist, used = np.inf, None, [], 0
+        bounds = [(-2 * np.pi, 2 * np.pi)] * n_params
+        for r in range(int(n_restarts)):
+            used = r + 1
             p0 = rng.uniform(-np.pi, np.pi, size=n_params)
-            # Give reasonable seeds for standard gates
-            if r == 0 and n_stages >= 1:
-                p0[6] = np.pi / 2.0 # theta
-                p0[7] = np.pi / 6.0 # phi
-
-            bounds = [(-2 * np.pi, 2 * np.pi) for _ in range(n_params)]
-            opt_res = scipy.optimize.minimize(
-                cost_and_grad,
-                p0,
-                method="L-BFGS-B",
-                jac=True,
-                bounds=bounds,
-                options={"maxiter": max_iter, "ftol": 1e-12, "disp": False},
+            if not template.is_fixed and r < len(SEED_ANGLES):
+                # cycle the FSim angles through a library of native points
+                for s in range(n_stages):
+                    idx = 6 + s * 8
+                    p0[idx], p0[idx + 1] = SEED_ANGLES[r]
+            hist: List[float] = []
+            res = scipy.optimize.minimize(
+                cost_and_grad, p0, method="L-BFGS-B", jac=True, bounds=bounds,
+                callback=lambda xk: hist.append(cost_and_grad(xk)[0]),
+                options={"maxiter": int(max_iter), "ftol": 1e-15, "gtol": 1e-12},
             )
-
-            if opt_res.fun < best_loss:
-                best_loss = float(opt_res.fun)
-                best_p = opt_res.x
-
+            if res.fun < best_loss:
+                best_loss, best_p, best_hist = float(res.fun), res.x, hist
             if best_loss < self.target_infidelity:
                 break
 
         u_synth = template.evaluate_unitary_np(best_p)
-        fid = float(np.real(np.trace(target_unitary.conj().T @ u_synth) * np.trace(u_synth.conj().T @ target_unitary)) / 16.0)
-
-        # Parse angles
-        fsim_angles = []
-        sq_angles = []
-        idx = 0
-        # Layer 0 1Q
-        sq_layer0 = [
-            (float(best_p[0]), float(best_p[1]), float(best_p[2])),
-            (float(best_p[3]), float(best_p[4]), float(best_p[5])),
-        ]
-        sq_angles.append(sq_layer0)
-        idx += 6
-
-        for s in range(n_stages):
-            fsim_angles.append((float(best_p[idx]), float(best_p[idx + 1])))
-            idx += 2
-            sq_layer = [
-                (float(best_p[idx]), float(best_p[idx + 1]), float(best_p[idx + 2])),
-                (float(best_p[idx + 3]), float(best_p[idx + 4]), float(best_p[idx + 5])),
-            ]
-            sq_angles.append(sq_layer)
-            idx += 6
-
+        fsim_angles, sq_angles = template.extract_angles(best_p)
+        fid = process_fidelity(target, u_synth)
         return DecompositionResult(
             n_stages=n_stages,
-            infidelity=float(best_loss),
-            fidelity=min(1.0, float(fid)),
-            optimal_params=best_p,
+            infidelity=float(1.0 - fid),
+            fidelity=float(min(1.0, fid)),
+            optimal_params=np.asarray(best_p),
             fsim_angles=fsim_angles,
             single_qubit_angles=sq_angles,
             synthesized_unitary=u_synth,
-            target_unitary=target_unitary,
-            is_success=bool(best_loss <= self.target_infidelity * 10),
+            target_unitary=target,
+            is_success=bool(1.0 - fid <= self.target_infidelity * 10),
+            native=template.is_fixed,
+            method="euclidean",
+            loss_history=best_hist,
+            n_restarts_used=used,
         )
 
 
 def synthesize_unitary_to_fsim(
-    unitary: np.ndarray, max_stages: int = 3, target_infidelity: float = 1e-6
+    unitary: np.ndarray,
+    max_stages: int = 3,
+    target_infidelity: float = 1e-6,
+    calibration: Optional[CouplerCalibration] = None,
+    method: str = "euclidean",
+    seed: int = 42,
 ) -> DecompositionResult:
-    """Convenience helper to synthesize a 4x4 unitary matrix."""
-    synth = DifferentiableFSimSynthesizer(target_infidelity=target_infidelity)
-    return synth.decompose(unitary, max_stages=max_stages)
+    """Convenience wrapper around :class:`DifferentiableFSimSynthesizer`."""
+    synth = DifferentiableFSimSynthesizer(target_infidelity=target_infidelity, seed=seed, method=method)
+    return synth.decompose(np.asarray(unitary), max_stages=max_stages, calibration=calibration)
