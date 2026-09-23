@@ -6,6 +6,14 @@ Cirq transformer that compiles any circuit to FSim + single-qubit gates.
   coupler's calibrated native gate when a ``SycamoreCalibrationMap`` is given).
 * Gates on three or more qubits are first expanded with ``cirq.decompose`` to
   one- and two-qubit operations and then compiled.
+* With ``consolidate=True`` (default) every maximal run of operations on the
+  same qubit pair — including the single-qubit gates between them — is merged
+  into one 4×4 unitary before synthesis, so a block such as CNOT·(T⊗T†)·CNOT
+  costs what its KAK class costs (≤ 3 native gates) instead of 2 per CNOT.
+* ``device_graph`` (a networkx graph of physical qubits) routes the circuit
+  first with Cirq's ``RouteCQC``, inserting SWAPs so that every two-qubit
+  operation acts on a physical coupler; consolidation then folds each SWAP into
+  its neighbouring gates where possible.
 * Identical two-qubit unitaries are synthesised once and cached.
 """
 
@@ -77,11 +85,16 @@ class FSimDecomposerTransformer:
         method: str = "euclidean",
         seed: int = 42,
         n_restarts: int = 4,
+        consolidate: bool = True,
+        device_graph=None,
     ):
         self.synthesizer = DifferentiableFSimSynthesizer(target_infidelity=target_infidelity, seed=seed, method=method)
         self.max_stages = int(max_stages)
         self.calibration_map = calibration_map
         self.n_restarts = int(n_restarts)
+        self.consolidate = bool(consolidate)
+        self.device_graph = device_graph
+        self.last_routing = None
         self._cache: Dict[Tuple[bytes, Optional[Tuple[float, float]]], DecompositionResult] = {}
         self.stats = {"synthesised": 0, "cache_hits": 0, "native_kept": 0, "decomposed_multi_qubit": 0}
 
@@ -125,11 +138,58 @@ class FSimDecomposerTransformer:
         for o in sub:
             self._compile_op(o, out)
 
-    def optimize_circuit(self, circuit: "cirq.Circuit") -> "cirq.Circuit":
+    def _expand_multi_qubit(self, circuit: "cirq.Circuit") -> "cirq.Circuit":
         ops: List["cirq.Operation"] = []
         for op in circuit.all_operations():
-            self._compile_op(op, ops)
+            if len(op.qubits) > 2:
+                sub = cirq.decompose(op, keep=lambda o: len(o.qubits) <= 2)
+                if any(len(o.qubits) > 2 for o in sub):
+                    raise NotImplementedError(f"cannot decompose {op} into ≤2-qubit operations")
+                self.stats["decomposed_multi_qubit"] += 1
+                ops.extend(sub)
+            else:
+                ops.append(op)
         return cirq.Circuit(ops)
+
+    def route(self, circuit: "cirq.Circuit") -> "cirq.Circuit":
+        """Map onto ``device_graph`` with SWAP insertion (Cirq RouteCQC); records the qubit maps."""
+        router = cirq.RouteCQC(self.device_graph)
+        routed, initial, swaps = router.route_circuit(circuit)
+        # logical qubit q starts on initial[q] and ends on swaps[initial[q]]
+        final = {q: swaps.get(p, p) for q, p in initial.items()}
+        self.last_routing = {"initial_map": initial, "final_map": final,
+                             "swaps": sum(1 for op in routed.all_operations() if op.gate == cirq.SWAP)}
+        return routed
+
+    def optimize_circuit(self, circuit: "cirq.Circuit") -> "cirq.Circuit":
+        measurements = [op for op in circuit.all_operations() if cirq.is_measurement(op)]
+        body = cirq.Circuit(op for op in circuit.all_operations() if not cirq.is_measurement(op))
+        body = self._expand_multi_qubit(body)
+        if self.device_graph is not None:
+            body = self.route(body)
+            if measurements:
+                final = self.last_routing["final_map"]
+                measurements = [m.transform_qubits(lambda q: final[q]) for m in measurements]
+        if self.consolidate:
+            body = cirq.merge_k_qubit_unitaries(body, k=2, rewriter=lambda op: op)
+        ops: List["cirq.Operation"] = []
+        for op in body.all_operations():
+            if isinstance(op, cirq.CircuitOperation):
+                inner = list(op.mapped_circuit().all_operations())
+                if len(op.qubits) == 2 and len(inner) == 1 and isinstance(inner[0].gate, (cirq.FSimGate, cirq.PhasedFSimGate)):
+                    self.stats["native_kept"] += 1
+                    ops.append(inner[0])
+                    continue
+                if len(op.qubits) == 1:
+                    ops.append(cirq.MatrixGate(cirq.unitary(op)).on(*op.qubits))
+                    continue
+                if len(op.qubits) == 2:
+                    q0, q1 = op.qubits
+                    res = self._synthesise(cirq.unitary(op), self._calibration_for(q0, q1))
+                    ops.extend(convert_decomposition_to_cirq_ops(res, q0, q1))
+                    continue
+            self._compile_op(op, ops)
+        return cirq.Circuit(ops + measurements)
 
 
 if HAS_CIRQ:
@@ -143,10 +203,13 @@ if HAS_CIRQ:
         max_stages: int = 3,
         calibration_map: Optional[SycamoreCalibrationMap] = None,
         method: str = "euclidean",
+        consolidate: bool = True,
+        device_graph=None,
     ) -> "cirq.Circuit":
         """``cirq.transformer``-compatible entry point."""
         tr = FSimDecomposerTransformer(target_infidelity=target_infidelity, max_stages=max_stages,
-                                       calibration_map=calibration_map, method=method)
+                                       calibration_map=calibration_map, method=method,
+                                       consolidate=consolidate, device_graph=device_graph)
         return tr.optimize_circuit(cirq.Circuit(circuit))
 
 else:  # pragma: no cover
@@ -161,8 +224,11 @@ def compile_circuit_to_sycamore_fsim(
     calibration_map: Optional[SycamoreCalibrationMap] = None,
     method: str = "euclidean",
     max_stages: int = 3,
+    consolidate: bool = True,
+    device_graph=None,
 ) -> "cirq.Circuit":
-    """Compile ``circuit`` to FSim + single-qubit gates."""
+    """Compile ``circuit`` to FSim + single-qubit gates (optionally routed onto ``device_graph``)."""
     tr = FSimDecomposerTransformer(target_infidelity=target_infidelity, max_stages=max_stages,
-                                   calibration_map=calibration_map, method=method)
+                                   calibration_map=calibration_map, method=method,
+                                   consolidate=consolidate, device_graph=device_graph)
     return tr.optimize_circuit(circuit)

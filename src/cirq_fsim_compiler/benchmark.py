@@ -51,7 +51,7 @@ def run_compiler_benchmark(as_json: bool = False, quick: bool = False) -> int:
         say(f"   {name:<12s}: euclidean 1−F = {e.infidelity:.1e} ({te:.2f} s, {len(e.loss_history)} it) | riemannian 1−F = {r.infidelity:.1e} ({tr:.2f} s, {len(r.loss_history)} it)")
         out[f"solver_{name}"] = {"euclidean": e.infidelity, "riemannian": r.infidelity}
 
-    say("\n3. Three-qubit gates (free angles)")
+    say("\n3. Three-qubit gates, free-angle FSim (consolidated two-qubit blocks)")
     from . import toffoli_decomposer as td
     q = cirq.LineQubit.range(3)
     for gname, fn, ref in (("Toffoli", td.decompose_toffoli_to_sycamore, cirq.unitary(cirq.CCNOT(*q))),
@@ -64,6 +64,23 @@ def run_compiler_benchmark(as_json: bool = False, quick: bool = False) -> int:
         say(f"   {gname:<8s}: fidelity {f:.8f}  FSim gates {n_fsim:2d}  moments {len(c):3d}  ({dt:.2f} s)")
         out[gname] = {"fidelity": f, "fsim": n_fsim}
 
+    say("\n3b. Three-qubit gates on calibrated Sycamore couplers: per-gate vs consolidated vs routed onto a line")
+    import networkx as nx
+    from .cirq_transformer import compile_circuit_to_sycamore_fsim
+    line = nx.Graph([(q[0], q[1]), (q[1], q[2])])
+    nominal = lambda: SycamoreCalibrationMap(seed=0, theta_drift_std=0.0, phi_drift_std=0.0)
+    counts = {}
+    for gname, build in (("Toffoli", td.toffoli_circuit), ("Fredkin", td.fredkin_circuit), ("CCZ", td.ccz_circuit), ("QFT3", td.qft3_circuit)):
+        c = build(*q)
+        n = lambda circ: sum(1 for op in circ.all_operations() if isinstance(op.gate, cirq.FSimGate))
+        naive = n(compile_circuit_to_sycamore_fsim(c, calibration_map=nominal(), consolidate=False))
+        merged = n(compile_circuit_to_sycamore_fsim(c, calibration_map=nominal()))
+        routed = n(compile_circuit_to_sycamore_fsim(c, calibration_map=nominal(), device_graph=line))
+        counts[gname] = {"per_gate": naive, "consolidated": merged, "line": routed}
+        say(f"   {gname:<8s}: {naive:2d} Sycamore gates per gate → {merged:2d} consolidated (all-to-all) | {routed:2d} on a line (routed)")
+    say("   (lower bound for Toffoli: 5 two-qubit gates of any kind)")
+    out["sycamore_counts"] = counts
+
     say("\n4. Calibration drift: recompile CZ on a drifted coupler")
     cm = SycamoreCalibrationMap(seed=3)
     drifted = cm.get_coupler(0, 1)
@@ -72,11 +89,12 @@ def run_compiler_benchmark(as_json: bool = False, quick: bool = False) -> int:
     say(f"   nominal FSim({cal.theta_cal:.4f}, {cal.phi_cal:.4f}): 1−F = {r0.infidelity:.1e} | drifted FSim({drifted.theta_cal:.4f}, {drifted.phi_cal:.4f}): 1−F = {r1.infidelity:.1e} (stages {r1.n_stages})")
     out["drift"] = {"nominal": r0.infidelity, "drifted": r1.infidelity}
 
-    say("\n5. Batch of 12 random U(4) with the native gate (2 threads)")
-    batch = [haar_random_unitary(4, seed=100 + k) for k in range(6 if quick else 12)]
+    n_batch = 6 if quick else 12
+    say(f"\n5. Batch of {n_batch} random U(4) with the native gate (serial)")
+    batch = [haar_random_unitary(4, seed=100 + k) for k in range(n_batch)]
     t0 = time.time()
-    stats = BatchFSimCompiler(target_infidelity=1e-7, n_workers=2, calibration=cal).compute_summary_statistics(
-        BatchFSimCompiler(target_infidelity=1e-7, n_workers=2, calibration=cal).compile_batch(batch))
+    stats = BatchFSimCompiler.compute_summary_statistics(
+        BatchFSimCompiler(target_infidelity=1e-7, calibration=cal).compile_batch(batch))
     say(f"   {stats}  ({time.time() - t0:.1f} s)")
     out["batch"] = stats
     say("=" * 74)
