@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0 — 2026-09-23
+
+Changes from an adversarial review of 0.3.
+
+### Fixed
+- The OpenQASM 3 importer called `eval()` on parameter expressions, stripped gate bodies with a regex that broke on nested braces, and required the register to be named `q`. It is now a tokenizer and recursive-descent parser with its own expression evaluator, named registers (and `qreg`/`creg`), user gate definitions inlined with parameters, broadcasting, both measurement syntaxes and `reset`. Errors raise `QasmParseError` with a line number.
+- Export no longer refuses measurements; they are written to bit registers.
+
+### Added
+- Two-qubit block consolidation in the transformer (default on): Toffoli 12 → 10, Fredkin 16 → 12 calibrated Sycamore gates.
+- Routing onto a coupling graph (`device_graph`, Cirq `RouteCQC`); measurements follow their qubits.
+- `BatchFSimCompiler(executor=...)`: spawn-based process pool with single-threaded workers, per-thread synthesisers, deterministic per-item seeds.
+
+### Changed
+- Dependencies: PennyLane removed (never imported); `cirq-core` and `networkx` instead of `cirq`.
+- Tests: 32 → 47.
+
 ## 0.3.0 — 2026-09-21
 
 ### Fixed (correctness)

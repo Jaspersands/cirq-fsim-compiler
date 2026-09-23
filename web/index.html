@@ -3,278 +3,280 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>FSim Compiler Workbench</title>
-<meta name="description" content="Synthesise any two-qubit unitary into FSim gates in your browser: free angles or a calibrated native gate, real BFGS loss curves, circuit diagram and OpenQASM 3 export from the actual result." />
+<title>FSim Synthesis</title>
+<meta name="description" content="Decompose any two-qubit unitary into FSim gates in the browser, with free angles or a calibrated native gate, and export the result as OpenQASM 3." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
 /* ---------------------------------------------------------------------------
-   qvibes design system — shared by all four project demos and the hub.
-   Tokens live on :root; each page overrides --accent / --accent-2 / --accent-rgb.
+   Shared stylesheet for the four project pages and the index.
+   Plain research-page styling: paper background, serif prose, hairline rules,
+   one muted accent per project (set with --accent on each page).
    --------------------------------------------------------------------------- */
 :root {
-  --bg: #070a12;
-  --bg-2: #0b101c;
-  --surface: #0f1522;
-  --surface-2: #151d2e;
-  --surface-3: #1b2538;
-  --border: #202b42;
-  --border-2: #2a3752;
-  --text: #e8eef8;
-  --text-2: #c2cde0;
-  --muted: #8592ad;
-  --muted-2: #5d6a86;
-  --accent: #22d3ee;
-  --accent-2: #60a5fa;
-  --accent-rgb: 34, 211, 238;
-  --ok: #34d399;
-  --warn: #fbbf24;
-  --bad: #fb7185;
-  --violet: #a78bfa;
-  --rose: #fb7185;
-  --emerald: #34d399;
-  --amber: #fbbf24;
-  --sky: #38bdf8;
-  --radius: 14px;
-  --radius-sm: 9px;
-  --shadow: 0 12px 40px -18px rgba(0, 0, 0, 0.7);
-  --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --bg: #f7f6f2;
+  --surface: #ffffff;
+  --surface-2: #f2f0ea;
+  --surface-3: #e9e6de;
+  --border: #e3dfd5;
+  --border-2: #cdc7b9;
+  --grid: #ece9e1;
+  --text: #1d1c1a;
+  --text-2: #3f3c36;
+  --muted: #6e695f;
+  --muted-2: #9b9589;
+  --accent: #1f5f8b;
+  --accent-soft: rgba(31, 95, 139, 0.10);
+  --ok: #3d7a55;
+  --warn: #9a6a12;
+  --bad: #a8412f;
+  /* data series (muted, distinguishable in both themes) */
+  --rose: #b0503a;
+  --violet: #6b58a6;
+  --emerald: #3d7a55;
+  --amber: #a8781c;
+  --sky: #3a7bab;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --font-serif: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151514; --surface: #1c1c1a; --surface-2: #232320; --surface-3: #2c2b28;
+    --border: #2f2e2a; --border-2: #45433d; --grid: #262522;
+    --text: #ebe8e1; --text-2: #cfcbc2; --muted: #9c978c; --muted-2: #706b62;
+    --accent-soft: rgba(120, 170, 210, 0.12);
+    --ok: #7fb893; --warn: #d4a64a; --bad: #e08a78;
+    --rose: #dc8a72; --violet: #a797dc; --emerald: #7fb893; --amber: #d4a64a; --sky: #7fb2d9;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #151514; --surface: #1c1c1a; --surface-2: #232320; --surface-3: #2c2b28;
+  --border: #2f2e2a; --border-2: #45433d; --grid: #262522;
+  --text: #ebe8e1; --text-2: #cfcbc2; --muted: #9c978c; --muted-2: #706b62;
+  --accent-soft: rgba(120, 170, 210, 0.12);
+  --ok: #7fb893; --warn: #d4a64a; --bad: #e08a78;
+  --rose: #dc8a72; --violet: #a797dc; --emerald: #7fb893; --amber: #d4a64a; --sky: #7fb2d9;
   color-scheme: dark;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
   font-family: var(--font-ui);
   font-size: 15px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--text);
-  background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(var(--accent-rgb), 0.10), transparent 60%),
-    radial-gradient(900px 500px at 100% 0%, rgba(96, 165, 250, 0.07), transparent 60%),
-    var(--bg);
-  min-height: 100vh;
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
 }
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-code, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-h1, h2, h3, h4 { margin: 0; line-height: 1.25; letter-spacing: -0.01em; }
+a { color: var(--accent); text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.92em; font-variant-numeric: tabular-nums; }
+h1, h2, h3, h4 { margin: 0; line-height: 1.25; font-weight: 600; }
 p { margin: 0; }
 button, input, select { font: inherit; color: inherit; }
-::selection { background: rgba(var(--accent-rgb), 0.35); }
+::selection { background: var(--accent-soft); }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 
 /* Layout ------------------------------------------------------------------ */
-.wrap { max-width: 1280px; margin: 0 auto; padding: 0 16px; }
-.site-header {
-  position: sticky; top: 0; z-index: 40;
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  background: rgba(7, 10, 18, 0.72);
-  border-bottom: 1px solid var(--border);
-}
-.site-header .wrap { display: flex; align-items: center; gap: 14px; min-height: 60px; }
-.brand { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 auto; }
-.brand > div { min-width: 0; }
-@media (max-width: 560px) { .brand-sub { display: none; } .brand-title { font-size: 14.5px; } }
-.brand-mark {
-  width: 36px; height: 36px; border-radius: 10px; flex: none;
-  display: grid; place-items: center; font-family: var(--font-mono); font-weight: 700; font-size: 15px;
-  color: #06070d;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  box-shadow: 0 6px 20px -6px rgba(var(--accent-rgb), 0.6);
-}
-.brand-title { font-weight: 700; font-size: 15.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.brand-sub { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex: none; }
-.hero { padding: 28px 0 8px; }
-.hero h1 { font-size: clamp(22px, 3.2vw, 32px); font-weight: 800; letter-spacing: -0.02em; }
-.hero p { color: var(--text-2); max-width: 820px; margin-top: 8px; font-size: 15px; }
-.hero-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+@media (min-width: 720px) { .wrap { padding: 0 28px; } }
+.site-header { border-bottom: 1px solid var(--border); }
+.site-header .wrap { display: flex; align-items: center; gap: 14px; min-height: 52px; }
+.brand { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1 1 auto; font-size: 14px; color: var(--muted); }
+.brand a { color: var(--muted); text-decoration: none; white-space: nowrap; }
+.brand a:hover { color: var(--text); }
+.brand .sep { color: var(--muted-2); }
+.brand-title { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand-mark, .brand-sub { display: none; }
+.header-actions { margin-left: auto; display: flex; gap: 18px; align-items: center; flex: none; font-size: 14px; }
+.header-actions a { color: var(--muted); text-decoration: none; }
+.header-actions a:hover { color: var(--text); }
+@media (max-width: 560px) { .header-actions a[href$="index.html"] { display: none; } .header-actions { gap: 14px; } }
 
-.layout { display: grid; grid-template-columns: 1fr; gap: 18px; padding: 18px 0 40px; }
+.hero { padding: 40px 0 8px; max-width: 760px; }
+.hero h1 { font-family: var(--font-serif); font-size: clamp(26px, 3.4vw, 36px); font-weight: 600; letter-spacing: -0.01em; }
+.hero p { font-family: var(--font-serif); color: var(--text-2); margin-top: 14px; font-size: 18px; line-height: 1.6; }
+.hero .check { font-family: var(--font-ui); font-size: 13px; color: var(--muted); margin-top: 16px; }
+.hero .check.ok::before { content: "✓ "; color: var(--ok); }
+.hero .check.bad { color: var(--bad); }
+.hero-row { display: none; }
+
+.layout { display: grid; grid-template-columns: 1fr; gap: 24px; padding: 28px 0 48px; }
 @media (min-width: 1024px) {
-  .layout { grid-template-columns: 350px minmax(0, 1fr); align-items: start; }
-  .sidebar { position: sticky; top: 76px; }
+  .layout { grid-template-columns: 320px minmax(0, 1fr); align-items: start; gap: 32px; }
+  .sidebar { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
 }
-.stack { display: grid; gap: 16px; min-width: 0; }
+.stack { display: grid; gap: 20px; min-width: 0; }
 .layout > *, .stack > *, .grid-2 > *, .stats > * { min-width: 0; }
-.grid-2 { display: grid; grid-template-columns: 1fr; gap: 16px; }
-@media (min-width: 720px) { .grid-2 { grid-template-columns: 1fr 1fr; } }
-.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.grid-2 { display: grid; grid-template-columns: 1fr; gap: 20px; }
+@media (min-width: 760px) { .grid-2 { grid-template-columns: 1fr 1fr; } }
+
+/* Summary numbers: a single ruled row, no cards */
+.stats {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
 @media (min-width: 720px) { .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.stats > .panel.stat { background: none; border: 0; border-radius: 0; padding: 14px 16px 14px 0; }
+.stats > .panel.stat + .panel.stat { padding-left: 16px; border-left: 1px solid var(--border); }
+@media (max-width: 719px) { .stats > .panel.stat:nth-child(3) { border-left: 0; padding-left: 0; } .stats > .panel.stat:nth-child(n+3) { border-top: 1px solid var(--border); } }
+.stat-label { font-size: 12.5px; color: var(--muted); }
+.stat-value { font-family: var(--font-mono); font-weight: 500; font-size: clamp(18px, 2vw, 23px); margin-top: 2px; color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stat-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
 /* Panels ------------------------------------------------------------------ */
-.panel {
-  background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0)) , var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 18px;
-}
-.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
-.panel-title { font-size: 13.5px; font-weight: 700; letter-spacing: 0.01em; }
-.panel-kicker {
-  font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--accent); margin-bottom: 10px;
-}
-.panel-note { font-size: 12.5px; color: var(--muted); }
-.stat { padding: 14px 16px; border-left: 3px solid var(--accent); }
-.stat-label { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
-.stat-value { font-family: var(--font-mono); font-weight: 700; font-size: clamp(17px, 1.8vw, 22px); margin-top: 4px; color: var(--text); overflow-wrap: anywhere; }
-.stat-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
-.stat.violet { border-color: var(--violet); } .stat.rose { border-color: var(--rose); }
-.stat.emerald { border-color: var(--emerald); } .stat.amber { border-color: var(--amber); } .stat.sky { border-color: var(--sky); }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 14px; margin-bottom: 12px; flex-wrap: wrap; }
+.panel-title { font-family: var(--font-serif); font-size: 17px; font-weight: 600; }
+.panel-kicker { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.panel-note { font-size: 13px; color: var(--muted); margin-top: 3px; max-width: 70ch; }
+.panel.claim { background: var(--surface-2); }
 .chart { position: relative; width: 100%; }
-.chart.h-64 { height: 260px; } .chart.h-56 { height: 220px; } .chart.h-48 { height: 190px; }
+.chart.h-64 { height: 270px; } .chart.h-56 { height: 230px; } .chart.h-48 { height: 200px; }
+figure { margin: 0; }
+figcaption { font-size: 13px; color: var(--muted); margin-top: 8px; }
 
 /* Controls ---------------------------------------------------------------- */
-.field { display: grid; gap: 6px; margin-bottom: 12px; }
-.field-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12.5px; color: var(--text-2); }
-.field-row .val { font-family: var(--font-mono); font-weight: 600; color: var(--accent); }
+.field { display: grid; gap: 4px; margin-bottom: 14px; }
+.field-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; color: var(--text-2); }
+.field-row .val { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); }
 .select, .input {
-  width: 100%; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: var(--radius-sm);
-  padding: 8px 10px; font-size: 13.5px; color: var(--text); outline: none;
+  width: 100%; background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--radius-sm);
+  padding: 7px 9px; font-size: 13.5px; color: var(--text); outline: none;
 }
-.select:focus, .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18); }
-.range { -webkit-appearance: none; appearance: none; width: 100%; height: 26px; background: transparent; margin: 0; }
+.select:focus, .input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.range { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; background: transparent; margin: 0; }
 .range:focus { outline: none; }
-.range::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: var(--border-2); }
-.range::-moz-range-track { height: 4px; border-radius: 4px; background: var(--border-2); }
-.range::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%;
-  background: var(--accent); border: 2px solid var(--bg); box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.45);
-  cursor: pointer; transition: transform 120ms ease;
-}
-.range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); cursor: pointer; }
-.range:active::-webkit-slider-thumb { transform: scale(1.15); }
-.toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); margin-bottom: 10px; cursor: pointer; }
-.toggle .t-title { font-weight: 600; font-size: 13px; }
-.toggle .t-sub { font-size: 11.5px; color: var(--muted); }
-.switch { position: relative; width: 38px; height: 22px; flex: none; }
+.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent-soft); }
+.range::-webkit-slider-runnable-track { height: 2px; background: var(--border-2); }
+.range::-moz-range-track { height: 2px; background: var(--border-2); }
+.range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -6px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); cursor: pointer; }
+.range::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); cursor: pointer; }
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--border); cursor: pointer; }
+.toggle + .toggle { border-top: 1px solid var(--border); }
+.toggle:last-of-type { border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+.toggle .t-title { font-size: 13px; color: var(--text); }
+.toggle .t-sub { font-size: 12px; color: var(--muted); }
+.switch { position: relative; width: 30px; height: 18px; flex: none; }
 .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
-.switch .knob { position: absolute; inset: 0; border-radius: 22px; background: var(--border-2); transition: background 150ms ease; }
-.switch .knob::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 150ms ease; }
+.switch .knob { position: absolute; inset: 0; border-radius: 18px; background: var(--border-2); transition: background 120ms ease; }
+.switch .knob::after { content: ""; position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); transition: transform 120ms ease; }
 .switch input:checked + .knob { background: var(--accent); }
-.switch input:checked + .knob::after { transform: translateX(16px); }
-.switch input:focus-visible + .knob { box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.35); }
+.switch input:checked + .knob::after { transform: translateX(12px); }
+.switch input:focus-visible + .knob { box-shadow: 0 0 0 3px var(--accent-soft); }
 
 .btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-2);
-  background: var(--surface-2); color: var(--text); font-weight: 600; font-size: 13.5px; cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease, transform 120ms ease, opacity 150ms ease;
-  text-decoration: none; white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-2);
+  background: var(--surface); color: var(--text); font-weight: 500; font-size: 13.5px; cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease; text-decoration: none; white-space: nowrap;
 }
-.btn:hover { background: var(--surface-3); border-color: var(--muted-2); text-decoration: none; }
-.btn:active { transform: translateY(1px); }
-.btn:disabled { opacity: 0.55; cursor: progress; }
-.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #06070d; border-color: transparent; box-shadow: 0 8px 24px -10px rgba(var(--accent-rgb), 0.7); }
-.btn-primary:hover { filter: brightness(1.07); background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+.btn:hover { background: var(--surface-2); border-color: var(--muted-2); }
+.btn:disabled { opacity: 0.6; cursor: progress; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent); filter: brightness(1.08); border-color: var(--accent); }
 .btn-block { width: 100%; }
-.btn-sm { padding: 6px 10px; font-size: 12.5px; }
-.btn-ghost { background: transparent; }
+.btn-sm { padding: 5px 10px; font-size: 12.5px; }
+.btn-ghost { border-color: transparent; background: transparent; }
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .seg { display: inline-flex; border: 1px solid var(--border-2); border-radius: var(--radius-sm); overflow: hidden; }
-.seg button { border: 0; background: transparent; padding: 6px 10px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
-.seg button.active { background: rgba(var(--accent-rgb), 0.18); color: var(--accent); }
+.seg button { border: 0; background: transparent; padding: 5px 10px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--border-2); }
+.seg button.active { background: var(--surface-2); color: var(--text); }
 
-/* Chips & badges ---------------------------------------------------------- */
-.chip {
-  display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px;
-  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em;
-  border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text-2);
-}
-.chip.accent { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.4); background: rgba(var(--accent-rgb), 0.10); }
-.chip.ok { color: var(--ok); border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.10); }
-.chip.warn { color: var(--warn); border-color: rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.10); }
-.chip.bad { color: var(--bad); border-color: rgba(251, 113, 133, 0.4); background: rgba(251, 113, 133, 0.10); }
-.dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.dot.pulse { animation: pulse 1.6s ease-in-out infinite; }
-@keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
-.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Inline annotations (formerly pill chips): plain muted text ---------------- */
+.chip { display: inline; font-family: var(--font-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chip.accent { color: var(--text-2); }
+.chip.ok { color: var(--ok); } .chip.warn { color: var(--warn); } .chip.bad { color: var(--bad); }
+.dot { display: none; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 
 /* Misc -------------------------------------------------------------------- */
-.kv { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; font-size: 12.5px; }
-.kv dt { color: var(--muted); } .kv dd { margin: 0; font-family: var(--font-mono); color: var(--text); text-align: right; }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; font-size: 13px; }
+.kv dt { color: var(--muted); white-space: nowrap; } .kv dd { margin: 0; font-family: var(--font-mono); font-size: 12.5px; color: var(--text); text-align: right; }
 .divider { height: 1px; background: var(--border); margin: 14px 0; }
-details.how { border: 1px dashed var(--border-2); border-radius: var(--radius); padding: 12px 16px; color: var(--text-2); font-size: 13.5px; }
-details.how summary { cursor: pointer; font-weight: 700; color: var(--text); list-style: none; display: flex; align-items: center; gap: 8px; }
+details.how { border-top: 1px solid var(--border); padding: 20px 0 0; color: var(--text-2); font-size: 14.5px; max-width: 80ch; }
+details.how summary { cursor: pointer; font-family: var(--font-serif); font-size: 20px; font-weight: 600; color: var(--text); list-style: none; }
 details.how summary::-webkit-details-marker { display: none; }
-details.how summary::before { content: "▸"; color: var(--accent); transition: transform 150ms ease; }
-details.how[open] summary::before { transform: rotate(90deg); }
-details.how ul { margin: 8px 0 0; padding-left: 18px; }
-details.how li { margin: 4px 0; }
+details.how summary::after { content: " +"; color: var(--muted); font-weight: 400; }
+details.how[open] summary::after { content: " −"; }
+details.how ul { margin: 10px 0 0; padding-left: 18px; }
+details.how li { margin: 6px 0; }
+details.how b { color: var(--text); font-weight: 600; }
 .log {
   font-family: var(--font-mono); font-size: 12px; line-height: 1.55; color: var(--text-2);
-  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px;
-  max-height: 180px; overflow: auto; white-space: pre-wrap;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px;
+  max-height: 200px; overflow: auto; white-space: pre-wrap;
 }
-.gate-row { display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 8px 2px; }
-.gate { flex: none; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--border-2); background: var(--surface-2); font-family: var(--font-mono); font-size: 11.5px; white-space: nowrap; }
-.gate.accent { border-color: rgba(var(--accent-rgb), 0.5); background: rgba(var(--accent-rgb), 0.12); color: var(--accent); font-weight: 600; }
+.gate-row { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding: 8px 2px; }
+.gate { flex: none; padding: 5px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-2); background: var(--surface); font-family: var(--font-mono); font-size: 11.5px; white-space: nowrap; }
+.gate.accent { border-color: var(--accent); color: var(--accent); }
 .gate.wire { border: 0; background: transparent; color: var(--muted-2); padding: 0 2px; }
-.matrix { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-.matrix .cell { background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 2px; text-align: center; font-family: var(--font-mono); font-size: 11px; color: var(--accent); }
+.matrix { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
+.matrix .cell { background: var(--surface-2); border-radius: var(--radius-sm); padding: 6px 2px; text-align: center; font-family: var(--font-mono); font-size: 11px; color: var(--text); }
 .matrix .cell.dim { color: var(--muted-2); }
-.heat { display: grid; gap: 4px; }
-.heat .cell { aspect-ratio: 1.6; display: grid; place-items: center; border-radius: 6px; font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; border: 1px solid var(--border); }
-.site-footer { border-top: 1px solid var(--border); padding: 22px 0 32px; color: var(--muted); font-size: 12.5px; }
-.site-footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; justify-content: space-between; }
+.heat { display: grid; gap: 3px; }
+.heat .cell { aspect-ratio: 1.6; display: grid; place-items: center; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 11.5px; }
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+table.data th { text-align: left; font-weight: 500; color: var(--muted); border-bottom: 1px solid var(--border-2); padding: 6px 8px 6px 0; }
+table.data td { border-bottom: 1px solid var(--border); padding: 6px 8px 6px 0; font-family: var(--font-mono); font-size: 12.5px; }
+table.data td:first-child { font-family: var(--font-ui); font-size: 13px; }
+.site-footer { border-top: 1px solid var(--border); padding: 20px 0 32px; color: var(--muted); font-size: 13px; }
+.site-footer .wrap { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; justify-content: space-between; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-.progress { height: 4px; border-radius: 4px; background: var(--border); overflow: hidden; margin-top: 8px; }
+.progress { height: 2px; background: var(--border); overflow: hidden; margin-top: 10px; }
 .progress > div { height: 100%; width: 0; background: var(--accent); transition: width 120ms linear; }
+.busy { font-size: 12.5px; color: var(--muted); margin-top: 6px; min-height: 1.2em; }
 
-:root { --accent: #34d399; --accent-2: #2dd4bf; --accent-rgb: 52, 211, 153; }
+:root { --accent: #2f6b4f; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --accent: #86c2a0; } }
+:root[data-theme="dark"] { --accent: #86c2a0; }
 .presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.presets .btn.active { border-color: var(--accent); color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
+.presets .btn.active { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
 .stage-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.qasm { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; max-height: 260px; overflow: auto; white-space: pre; color: var(--text-2); }
+.qasm { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; max-height: 260px; overflow: auto; white-space: pre; color: var(--text-2); }
 .circuit { display: grid; grid-template-columns: 34px 1fr; gap: 6px 4px; align-items: center; overflow-x: auto; padding: 6px 0; }
 .wire-label { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
 .wire { display: flex; align-items: center; gap: 4px; min-width: max-content; position: relative; }
 .wire::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--border-2); z-index: 0; }
-.wire .gate { position: relative; z-index: 1; }
+.wire .gate { position: relative; z-index: 1; min-width: 78px; text-align: center; }
 .wire .gate.fsim { min-width: 128px; text-align: center; }
 </style>
 </head>
 <body>
 <header class="site-header">
   <div class="wrap">
-    <div class="brand">
-      <div class="brand-mark">U₄</div>
-      <div>
-        <div class="brand-title">cirq-fsim-compiler</div>
-        <div class="brand-sub">U(4) → FSim synthesis · calibrated native gates · OpenQASM 3 · v0.3.0</div>
-      </div>
-    </div>
+    <nav class="brand" aria-label="Breadcrumb">
+      <a href="../../index.html">Jasper Sands</a><span class="sep">/</span><span class="brand-title">cirq-fsim-compiler</span>
+    </nav>
     <div class="header-actions">
-      <a class="btn btn-sm btn-ghost" href="../../index.html">← Suite</a>
-      <a class="btn btn-sm" href="https://github.com/Jaspersands/cirq-fsim-compiler" target="_blank" rel="noopener">GitHub ↗</a>
+      <a href="../../index.html">All projects</a>
+      <a href="https://github.com/Jaspersands/cirq-fsim-compiler">Source</a>
     </div>
   </div>
 </header>
 
 <main class="wrap">
   <section class="hero">
-    <h1>Compile any two-qubit unitary into FSim gates</h1>
-    <p>The synthesiser below is the JavaScript twin of the Python package: the same template L<sub>n</sub>·FSim(θ<sub>n</sub>,φ<sub>n</sub>)·…·FSim(θ<sub>1</sub>,φ<sub>1</sub>)·L<sub>0</sub>, the same loss 1 − |Tr(U<sub>t</sub>†U)|²/16, BFGS with restarts, stages 1→3 until the tolerance is met. Toggle the calibrated native gate to see how many applications of one fixed coupler gate a target really needs.</p>
-    <div class="hero-row">
-      <span class="chip accent"><span class="dot"></span> 4×4 complex, BFGS + Armijo</span>
-      <span class="chip">free angles or fixed native FSim</span>
-      <span id="selftest" class="chip warn"><span class="dot pulse"></span> self-test running…</span>
-    </div>
+    <h1>Two-qubit gates from FSim interactions</h1>
+    <p>Superconducting processors with tunable couplers implement the fermionic-simulation gate FSim(θ, φ). Any two-qubit unitary can be built from at most three of them with single-qubit rotations in between. This page finds such a decomposition for a gate you choose, either with free angles or with the one gate a calibrated coupler actually performs, and writes the result as OpenQASM 3.</p>
+    <p class="check" id="selftest">Running checks…</p>
   </section>
 
   <div class="layout">
     <aside class="sidebar stack">
       <div class="panel">
-        <div class="panel-kicker">01 · Target unitary</div>
+        <div class="panel-kicker">Target</div>
         <div class="presets">
           <button class="btn btn-sm preset active" data-p="cnot">CNOT</button><button class="btn btn-sm preset" data-p="cz">CZ</button><button class="btn btn-sm preset" data-p="iswap">iSWAP</button>
           <button class="btn btn-sm preset" data-p="sqrt_iswap">√iSWAP</button><button class="btn btn-sm preset" data-p="swap">SWAP</button><button class="btn btn-sm preset" data-p="random">Random U(4)</button>
@@ -284,18 +286,18 @@ details.how li { margin: 4px 0; }
           <input id="seed" class="range" type="range" min="1" max="99" step="1" value="7" />
         </div>
         <div class="matrix" id="targetMatrix"></div>
-        <p class="panel-note" style="margin-top:8px">Entries shown as |z| with phase colour; hover for the complex value.</p>
+        <p class="panel-note" style="margin-top:8px">Magnitudes, coloured by phase. Hover for the complex value.</p>
       </div>
 
       <div class="panel">
-        <div class="panel-kicker">02 · Gate model</div>
-        <label class="toggle"><div><div class="t-title">Calibrated native gate</div><div class="t-sub">freeze (θ, φ), optimise only the 1Q dressings</div></div><span class="switch"><input id="native" type="checkbox" /><span class="knob"></span></span></label>
+        <div class="panel-kicker">Native gate</div>
+        <label class="toggle"><div><div class="t-title">Use a calibrated coupler</div><div class="t-sub">Fix (θ, φ); optimise only the single-qubit layers</div></div><span class="switch"><input id="native" type="checkbox" /><span class="knob"></span></span></label>
         <div class="field">
           <label class="field-row" for="calPreset"><span>Coupler</span></label>
           <select id="calPreset" class="select">
             <option value="sycamore">Sycamore FSim(π/2, π/6)</option>
             <option value="sqrt_iswap">√iSWAP FSim(π/4, 0)</option>
-            <option value="custom">Custom (sliders)</option>
+            <option value="custom">Custom</option>
           </select>
         </div>
         <div class="field">
@@ -310,64 +312,66 @@ details.how li { margin: 4px 0; }
           <label class="field-row" for="tol"><span>Target infidelity</span></label>
           <select id="tol" class="select"><option value="1e-6">10⁻⁶</option><option value="1e-9" selected>10⁻⁹</option><option value="1e-12">10⁻¹²</option></select>
         </div>
-        <button id="btnRun" class="btn btn-primary btn-block">⚡ Compile (stages 1 → 3)</button>
+        <button id="btnRun" class="btn btn-primary btn-block">Decompose</button>
         <div class="progress"><div id="prog"></div></div>
+        <div class="busy" id="runStatus"></div>
       </div>
     </aside>
 
     <section class="stack">
       <div class="stats">
-        <div class="panel stat"><div class="stat-label">Infidelity 1 − F</div><div class="stat-value" id="sInf">—</div><div class="stat-sub" id="sInfSub">process fidelity |Tr(U†U_t)|²/16</div></div>
-        <div class="panel stat sky"><div class="stat-label">FSim stages</div><div class="stat-value" id="sStages">—</div><div class="stat-sub" id="sStagesSub">smallest n meeting tolerance</div></div>
-        <div class="panel stat amber"><div class="stat-label">Compile time</div><div class="stat-value" id="sTime">—</div><div class="stat-sub" id="sTimeSub">BFGS iterations</div></div>
-        <div class="panel stat violet"><div class="stat-label">max |U − e^{iα}U_t|</div><div class="stat-value" id="sErr">—</div><div class="stat-sub">entry-wise after global phase</div></div>
+        <div class="panel stat"><div class="stat-label">Infidelity</div><div class="stat-value" id="sInf">—</div><div class="stat-sub" id="sInfSub">1 − |Tr(U†U<sub>target</sub>)|²/16</div></div>
+        <div class="panel stat"><div class="stat-label">FSim gates</div><div class="stat-value" id="sStages">—</div><div class="stat-sub" id="sStagesSub">fewest that reach the tolerance</div></div>
+        <div class="panel stat"><div class="stat-label">Time</div><div class="stat-value" id="sTime">—</div><div class="stat-sub" id="sTimeSub"></div></div>
+        <div class="panel stat"><div class="stat-label">Largest entry error</div><div class="stat-value" id="sErr">—</div><div class="stat-sub">after removing the global phase</div></div>
       </div>
 
       <div class="panel">
-        <div class="panel-head"><div><div class="panel-title">Loss convergence per stage count</div><div class="panel-note">Best restart for each n. A stage count that flattens far above the tolerance cannot express the target.</div></div><div class="stage-row" id="stageChips"></div></div>
+        <div class="panel-head"><div><div class="panel-title">Convergence for one, two and three gates</div><div class="panel-note">Best restart for each gate count. A curve that levels off far above the tolerance means that many gates cannot express the target.</div></div><div class="stage-row tags" id="stageChips"></div></div>
         <div class="chart h-64"><canvas id="lossChart"></canvas></div>
       </div>
 
       <div class="panel">
-        <div class="panel-head"><div class="panel-title">Synthesised circuit</div><span class="chip" id="chipCircuit">—</span></div>
+        <div class="panel-head"><div class="panel-title">Circuit</div><span class="chip" id="chipCircuit"></span></div>
         <div class="circuit" id="circuit"></div>
       </div>
 
       <div class="grid-2">
         <div class="panel">
-          <div class="panel-head"><div class="panel-title">Synthesised unitary</div><span class="chip" id="chipU">—</span></div>
+          <div class="panel-head"><div class="panel-title">Resulting unitary</div><span class="chip" id="chipU"></span></div>
           <div class="matrix" id="synthMatrix"></div>
         </div>
         <div class="panel">
-          <div class="panel-head"><div class="panel-title">OpenQASM 3</div><div class="btn-row"><button id="btnQasm" class="btn btn-sm">Download .qasm</button></div></div>
+          <div class="panel-head"><div class="panel-title">OpenQASM 3</div><div class="btn-row"><button id="btnQasm" class="btn btn-sm">Download</button></div></div>
           <div class="qasm" id="qasm">—</div>
         </div>
       </div>
 
       <details class="how">
-        <summary>How this page computes its numbers</summary>
+        <summary>Method</summary>
         <ul>
-          <li><b>Template.</b> L<sub>k</sub> = (Rz·Rx·Rz) ⊗ (Rz·Rx·Rz) with 6 angles; FSim(θ,φ) = [[1,0,0,0],[0,cos θ,−i sin θ,0],[0,−i sin θ,cos θ,0],[0,0,0,e<sup>−iφ</sup>]] (Cirq's convention, qubit 0 most significant).</li>
-          <li><b>Loss.</b> 1 − |Tr(U<sub>t</sub>†U)|²/16, invariant under global phase.</li>
-          <li><b>Optimiser.</b> BFGS with Armijo backtracking and central-difference gradients; up to 6 restarts per stage count, the first seeded at CZ-like (0, π), √iSWAP, iSWAP and Sycamore angles when the angles are free. Python uses L-BFGS-B with JAX gradients on the same loss.</li>
-          <li><b>Native mode.</b> The FSim angles are constants; only the 6(n+1) dressing angles are optimised — exactly the calibrated path of the Python package.</li>
-          <li><b>Random U(4).</b> QR of a complex Gaussian matrix with phase correction (Haar measure), seeded so results are reproducible.</li>
-          <li><b>QASM.</b> Generated from the actual angles; `gate fsim` is defined with stdgates: exp(−iθ/2(XX+YY)) via two CNOT–Rz–CNOT conjugations, then cp(−φ).</li>
+          <li><b>Template.</b> L<sub>n</sub>·FSim(θ<sub>n</sub>, φ<sub>n</sub>)·…·FSim(θ₁, φ₁)·L₀ with L<sub>k</sub> = (Rz·Rx·Rz) ⊗ (Rz·Rx·Rz), six angles per layer. FSim(θ, φ) = [[1, 0, 0, 0], [0, cos θ, −i sin θ, 0], [0, −i sin θ, cos θ, 0], [0, 0, 0, e<sup>−iφ</sup>]] in Cirq's convention.</li>
+          <li><b>Loss.</b> 1 − |Tr(U<sub>target</sub>†U)|²/16, which ignores the global phase.</li>
+          <li><b>Optimiser.</b> BFGS with backtracking and numerical gradients, up to six restarts per gate count. With free angles the first restarts start from CZ-like, √iSWAP, iSWAP and Sycamore angles. It runs in a Web Worker. The Python package uses L-BFGS-B with JAX gradients on the same loss, and also offers a Riemannian solver on U(2)⁴.</li>
+          <li><b>Calibrated mode.</b> The FSim angles are constants, and only the 6(n + 1) single-qubit angles are optimised. This is why a CZ needs two Sycamore gates and a SWAP needs three.</li>
+          <li><b>Random unitaries.</b> Gram–Schmidt on a complex Gaussian matrix with random column phases (Haar measure), seeded for reproducibility.</li>
+          <li><b>OpenQASM.</b> Written from the fitted angles. <code>gate fsim</code> is defined with standard gates, as exp(−iθ/2 (XX + YY)) followed by cp(−φ), so any OpenQASM 3 simulator can run the file. The Python package also parses OpenQASM 3 back into Cirq and compiles three-qubit gates with two-qubit block consolidation and routing.</li>
         </ul>
       </details>
     </section>
   </div>
 </main>
 
-<footer class="site-footer"><div class="wrap"><span>cirq-fsim-compiler v0.3.0 · Jasper Sands · Apache-2.0</span><span class="mono">Python: Cirq · JAX · SciPy — this page: vanilla JS + Chart.js</span></div></footer>
+<footer class="site-footer"><div class="wrap"><span>cirq-fsim-compiler 0.3 · Jasper Sands · Apache-2.0</span><span>Python: Cirq, JAX, SciPy. This page: plain JavaScript and Chart.js.</span></div></footer>
 
-<script>
+<script id="engine">
 /* ---------------------------------------------------------------------------
    qcore — tiny dense complex linear algebra + optimisers for the qvibes demos.
    Matrices are {n, m, re: Float64Array, im: Float64Array} in row-major order.
    --------------------------------------------------------------------------- */
 const Q = (() => {
   const TWO_PI = 2 * Math.PI;
+  const SUP = { '-': '⁻', '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' };
 
   function zeros(n, m = n) { return { n, m, re: new Float64Array(n * m), im: new Float64Array(n * m) }; }
   function eye(n) { const A = zeros(n); for (let i = 0; i < n; i++) A.re[i * n + i] = 1; return A; }
@@ -525,34 +529,76 @@ const Q = (() => {
 
   // ---- Chart.js theme ------------------------------------------------------------
   function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  /** A CSS colour token with alpha, e.g. alpha('--accent', 0.12). Accepts #rgb/#rrggbb tokens. */
+  function alpha(name, a) {
+    let h = css(name).replace('#', '');
+    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+    const n = parseInt(h, 16);
+    return Number.isFinite(n) ? `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})` : css(name);
+  }
   function chartDefaults() {
     if (typeof Chart === 'undefined') return;
-    Chart.defaults.color = css('--muted'); Chart.defaults.borderColor = css('--border');
-    Chart.defaults.font.family = css('--font-mono') || 'monospace'; Chart.defaults.font.size = 11;
-    Chart.defaults.plugins.legend.labels.boxWidth = 10; Chart.defaults.plugins.legend.labels.boxHeight = 10;
+    Chart.defaults.color = css('--muted'); Chart.defaults.borderColor = css('--grid');
+    Chart.defaults.font.family = css('--font-ui') || 'sans-serif'; Chart.defaults.font.size = 11.5;
+    Chart.defaults.plugins.legend.align = 'start';
+    Chart.defaults.plugins.legend.labels.boxWidth = 14; Chart.defaults.plugins.legend.labels.boxHeight = 2;
     Chart.defaults.plugins.legend.labels.color = css('--text-2');
-    Chart.defaults.plugins.tooltip.backgroundColor = css('--surface-3'); Chart.defaults.plugins.tooltip.titleColor = css('--text'); Chart.defaults.plugins.tooltip.bodyColor = css('--text-2'); Chart.defaults.plugins.tooltip.borderColor = css('--border-2'); Chart.defaults.plugins.tooltip.borderWidth = 1;
-    Chart.defaults.elements.point.radius = 0; Chart.defaults.elements.line.borderWidth = 2; Chart.defaults.animation = false;
+    Chart.defaults.plugins.tooltip.backgroundColor = css('--surface'); Chart.defaults.plugins.tooltip.titleColor = css('--text');
+    Chart.defaults.plugins.tooltip.bodyColor = css('--text-2'); Chart.defaults.plugins.tooltip.borderColor = css('--border-2');
+    Chart.defaults.plugins.tooltip.borderWidth = 1; Chart.defaults.plugins.tooltip.cornerRadius = 3;
+    Chart.defaults.elements.point.radius = 0; Chart.defaults.elements.line.borderWidth = 1.75; Chart.defaults.animation = false;
     Chart.defaults.responsive = true; Chart.defaults.maintainAspectRatio = false;
   }
   function axis(title, extra = {}) {
-    const base = { grid: { color: css('--border') }, ticks: { color: css('--muted'), maxTicksLimit: 8 }, title: { display: !!title, text: title, color: css('--muted') } };
+    const base = { grid: { color: css('--grid'), drawTicks: false }, border: { color: css('--border-2') },
+                   ticks: { color: css('--muted'), maxTicksLimit: 7, padding: 6 },
+                   title: { display: !!title, text: title, color: css('--muted') } };
     const out = Object.assign(base, extra);
-    if (out.type === 'logarithmic') out.ticks = Object.assign({ callback: v => { const e = Math.log10(v); return Number.isInteger(e) ? (e >= -2 && e <= 3 ? String(v) : `1e${e}`) : ''; } }, out.ticks || {}, { color: css('--muted') });
+    if (out.type === 'logarithmic') out.ticks = Object.assign({ callback: v => { const e = Math.round(Math.log10(v)); if (Math.abs(Math.log10(v) - e) > 1e-9) return ''; return e >= -2 && e <= 3 ? String(v) : '10' + String(e).split('').map(c => SUP[c] || c).join(''); } }, out.ticks || {}, { color: css('--muted') });
     return out;
   }
-  const fmt = { pct: (x, d = 3) => (100 * x).toFixed(d) + '%', sci: (x, d = 2) => x === 0 ? '0' : x.toExponential(d).replace('e', '×10^').replace('+', ''), num: (x, d = 3) => Number(x).toFixed(d) };
+  function sci(x, d = 2) {
+    if (x === 0) return '0';
+    if (!Number.isFinite(x)) return String(x);
+    const [m, e] = x.toExponential(d).split('e');
+    const exp = parseInt(e, 10);
+    if (exp >= -2 && exp <= 3) return Number(x).toPrecision(d + 1);
+    return `${m} × 10${String(exp).split('').map(c => SUP[c] || c).join('')}`;
+  }
+  const fmt = { pct: (x, d = 3) => (100 * x).toFixed(d) + '%', sci, num: (x, d = 3) => Number(x).toFixed(d) };
 
-  return { TWO_PI, zeros, eye, clone, fromRows, mul, add, scale, adj, trace, kron, expm, processFidelity, applyToVec, rz, isUnitary, eigh, bfgs, nelderMead, rng, css, chartDefaults, axis, fmt };
+  // ---- Web Workers ----------------------------------------------------------------
+  /**
+   * Run engine function ``fnName(...args, onProgress)`` in a Web Worker built from
+   * ``engineSrc`` (the page's DOM-free engine script, which includes this file), so
+   * long optimisations never block the page. Falls back to the main thread if
+   * workers are unavailable. The function must be a top-level ``function``
+   * declaration and its arguments and result must be structured-cloneable.
+   */
+  function offload(engineSrc, fnName, args = [], onProgress = null) {
+    const direct = () => new Promise(resolve => setTimeout(() => resolve(self[fnName](...args, onProgress || (() => {}))), 0));
+    let worker;
+    try {
+      const tail = '\nself.onmessage = e => { try { const r = self[e.data.fn](...e.data.args, p => self.postMessage({ progress: p })); self.postMessage({ result: r }); } catch (err) { self.postMessage({ error: String((err && err.stack) || err) }); } };';
+      worker = new Worker(URL.createObjectURL(new Blob([engineSrc, tail], { type: 'text/javascript' })));
+    } catch (e) {
+      return direct();
+    }
+    return new Promise((resolve, reject) => {
+      worker.onmessage = e => {
+        if ('progress' in e.data) { if (onProgress) onProgress(e.data.progress); return; }
+        worker.terminate();
+        if (e.data.error) reject(new Error(e.data.error)); else resolve(e.data.result);
+      };
+      worker.onerror = e => { worker.terminate(); e.preventDefault(); direct().then(resolve, reject); };
+      worker.postMessage({ fn: fnName, args });
+    });
+  }
+
+  return { TWO_PI, zeros, eye, clone, fromRows, mul, add, scale, adj, trace, kron, expm, processFidelity, applyToVec, rz, isUnitary, eigh, bfgs, nelderMead, rng, css, alpha, chartDefaults, axis, fmt, offload };
 })();
 
-</script>
-<script>
-(() => {
-'use strict';
-const $ = id => document.getElementById(id);
 const PI = Math.PI;
-
 // ---------------------------------------------------------------- matrices
 function fsim(th, ph) { const c = Math.cos(th), s = Math.sin(th); return Q.fromRows([[1, 0, 0, 0], [0, c, [0, -s], 0], [0, [0, -s], c, 0], [0, 0, 0, [Math.cos(ph), -Math.sin(ph)]]]); }
 function zxz(a, b, g) { const cb = Math.cos(b / 2), sb = Math.sin(b / 2); const e = t => [Math.cos(t), Math.sin(t)]; const mul = (x, y) => [x[0] * y[0] - x[1] * y[1], x[0] * y[1] + x[1] * y[0]];
@@ -592,12 +638,33 @@ function synthesiseStage(target, n, fixed, restarts, tol, rng) {
 function angles(p, n, fixed) { const out = { sq: [[p[0], p[1], p[2]], [p[3], p[4], p[5]]], fsim: [], layers: [[[p[0], p[1], p[2]], [p[3], p[4], p[5]]]] }; let idx = 6;
   for (let s = 0; s < n; s++) { if (fixed) out.fsim.push(fixed); else { out.fsim.push([p[idx], p[idx + 1]]); idx += 2; } out.layers.push([[p[idx], p[idx + 1], p[idx + 2]], [p[idx + 3], p[idx + 4], p[idx + 5]]]); idx += 6; } return out; }
 
+/** Try 1, 2, 3 FSim gates until the tolerance is met; progress reports each gate count. */
+function compileStages(target, fixed, tol, seed, onProgress) {
+  const rng = Q.rng(1000 + seed); const stages = []; let chosen = null;
+  for (let n = 1; n <= 3; n++) {
+    const best = synthesiseStage(target, n, fixed, 6, tol, rng);
+    const entry = { n, f: best.f, history: best.history, x: Array.from(best.x), restarts: best.restarts, ok: best.f < tol };
+    stages.push(entry); onProgress(stages.slice());
+    if (!chosen || best.f < chosen.f) chosen = entry;
+    if (entry.ok) { chosen = entry; break; }
+  }
+  return { stages, chosen };
+}
+</script>
+<script>
+(() => {
+'use strict';
+const ENGINE = document.getElementById('engine').textContent;
+const $ = id => document.getElementById(id);
+
 // ---------------------------------------------------------------- UI
 Q.chartDefaults(); const C = Q.css;
 const S = { preset: 'cnot', seed: 7, target: null, result: null };
 const lossChart = new Chart($('lossChart'), { type: 'line', data: { labels: [], datasets: [] }, options: { scales: { x: Q.axis('BFGS iteration'), y: Q.axis('1 − F', { type: 'logarithmic' }) } } });
-const stageColors = [C('--muted'), C('--sky'), C('--accent')];
-function phaseColor(re, im) { const h = (Math.atan2(im, re) * 180 / PI + 360) % 360; return `hsl(${h.toFixed(0)}, 70%, 62%)`; }
+const stageColors = [C('--muted-2'), C('--amber'), C('--accent')];
+const tiny = f => (f < 1e-15 ? '< 10⁻¹⁵' : Q.fmt.sci(f, 2));
+const DARK = matchMedia('(prefers-color-scheme: dark)').matches;
+function phaseColor(re, im) { const h = (Math.atan2(im, re) * 180 / PI + 360) % 360; return DARK ? `hsl(${h.toFixed(0)}, 45%, 70%)` : `hsl(${h.toFixed(0)}, 50%, 36%)`; }
 function renderMatrix(el, M) { el.innerHTML = ''; for (let i = 0; i < 16; i++) { const re = M.re[i], im = M.im[i], mag = Math.hypot(re, im); const d = document.createElement('div'); d.className = 'cell' + (mag < 1e-9 ? ' dim' : ''); d.textContent = mag < 1e-9 ? '0' : mag.toFixed(3); if (mag >= 1e-9) d.style.color = phaseColor(re, im); d.title = `${re.toFixed(5)} ${im >= 0 ? '+' : '−'} ${Math.abs(im).toFixed(5)}i`; el.appendChild(d); } }
 function fixedAngles() { if (!$('native').checked) return null; return [+$('th').value, +$('ph').value]; }
 function readCal() { const pre = $('calPreset').value; if (pre === 'sycamore') { $('th').value = PI / 2; $('ph').value = PI / 6; } else if (pre === 'sqrt_iswap') { $('th').value = PI / 4; $('ph').value = 0; } $('vTh').textContent = (+$('th').value).toFixed(4); $('vPh').textContent = (+$('ph').value).toFixed(4); }
@@ -608,37 +675,38 @@ function renderCircuit(res) {
   for (let q = 0; q < 2; q++) { const lab = document.createElement('div'); lab.className = 'wire-label'; lab.textContent = 'q' + q; el.appendChild(lab); const w = document.createElement('div'); w.className = 'wire';
     for (let l = 0; l <= res.n; l++) { const [al, be, ga] = a.layers[l][q]; w.appendChild(gateBlock(`Rz ${fmt(ga)}`)); w.appendChild(gateBlock(`Rx ${fmt(be)}`)); w.appendChild(gateBlock(`Rz ${fmt(al)}`)); if (l < res.n) w.appendChild(gateBlock(`FSim(${fmt(a.fsim[l][0])}, ${fmt(a.fsim[l][1])})`, 'accent fsim')); }
     el.appendChild(w); }
-  $('chipCircuit').textContent = `${res.n} FSim + ${6 * (res.n + 1)} single-qubit rotations · ${res.fixed ? 'native' : 'free angles'}`;
+  $('chipCircuit').textContent = `${res.n} FSim and ${6 * (res.n + 1)} single-qubit rotations, ${res.fixed ? 'calibrated angles' : 'free angles'}`;
 }
 function qasmText(res) {
   const a = angles(res.p, res.n, res.fixed); const f = v => v.toFixed(10); const lines = ['OPENQASM 3.0;', 'include "stdgates.inc";', '', '// FSim(theta, phi) = exp(-i theta/2 (XX+YY)) cp(-phi)', 'gate fsim(theta, phi) a, b {', '  h a; h b; cx a, b; rz(theta) b; cx a, b; h a; h b;', '  sdg a; sdg b; h a; h b; cx a, b; rz(theta) b; cx a, b; h a; h b; s a; s b;', '  cp(-phi) a, b;', '}', '', 'qubit[2] q;', ''];
   const layer = l => { for (let q = 0; q < 2; q++) { const [al, be, ga] = a.layers[l][q]; if (Math.abs(ga) > 1e-9) lines.push(`rz(${f(ga)}) q[${q}];`); if (Math.abs(be) > 1e-9) lines.push(`rx(${f(be)}) q[${q}];`); if (Math.abs(al) > 1e-9) lines.push(`rz(${f(al)}) q[${q}];`); } };
   layer(0); for (let s = 0; s < res.n; s++) { lines.push(`fsim(${f(a.fsim[s][0])}, ${f(a.fsim[s][1])}) q[0], q[1];`); layer(s + 1); } return lines.join('\n') + '\n';
 }
+function showStages(stages) {
+  lossChart.data.datasets = stages.map(st => ({ label: `${st.n} gate${st.n > 1 ? 's' : ''}`, data: st.history.map(v => Math.max(v, 1e-16)), borderColor: stageColors[st.n - 1] }));
+  lossChart.data.labels = Array.from({ length: Math.max(...stages.map(st => st.history.length)) }, (_, i) => i); lossChart.update();
+  $('stageChips').innerHTML = '';
+  for (const st of stages) { const chip = document.createElement('span'); chip.className = 'chip ' + (st.ok ? 'ok' : 'bad'); chip.textContent = `${st.n} gate${st.n > 1 ? 's' : ''}: ${tiny(Math.max(st.f, 0))}`; $('stageChips').appendChild(chip); }
+  $('prog').style.width = (stages.length * 33).toFixed(0) + '%';
+}
+let runId = 0;
 async function run() {
-  const btn = $('btnRun'); btn.disabled = true; btn.textContent = '⏳ compiling…'; $('prog').style.width = '5%';
-  const fixed = fixedAngles(); const tol = +$('tol').value; const rng = Q.rng(1000 + S.seed); const t0 = performance.now();
-  lossChart.data.datasets = []; $('stageChips').innerHTML = ''; let chosen = null; let iters = 0;
-  for (let n = 1; n <= 3; n++) {
-    await new Promise(r => setTimeout(r, 10));
-    const best = synthesiseStage(S.target, n, fixed, 6, tol, rng); iters += best.history.length;
-    lossChart.data.datasets.push({ label: `${n} stage${n > 1 ? 's' : ''}`, data: best.history.map(v => Math.max(v, 1e-16)), borderColor: stageColors[n - 1] });
-    lossChart.data.labels = Array.from({ length: Math.max(lossChart.data.labels.length, best.history.length) }, (_, i) => i); lossChart.update();
-    const ok = best.f < tol; const chip = document.createElement('span'); chip.className = 'chip ' + (ok ? 'ok' : 'bad'); chip.textContent = `n=${n}: ${ok ? '✓' : '✗'} ${Q.fmt.sci(Math.max(best.f, 0), 1)}`; $('stageChips').appendChild(chip);
-    $('prog').style.width = (n * 33).toFixed(0) + '%';
-    if (!chosen || best.f < chosen.f) chosen = { ...best, n, fixed, p: best.x };
-    if (ok) { chosen = { ...best, n, fixed, p: best.x }; break; }
-  }
+  const id = ++runId; const btn = $('btnRun'); btn.disabled = true; btn.textContent = 'Decomposing…'; $('prog').style.width = '5%'; $('runStatus').textContent = 'running in a background worker';
+  const fixed = fixedAngles(); const tol = +$('tol').value; const t0 = performance.now();
+  const { stages, chosen: c } = await Q.offload(ENGINE, 'compileStages', [S.target, fixed, tol, S.seed], st => { if (id === runId) showStages(st); });
+  if (id !== runId) return;
+  showStages(stages);
+  const chosen = { ...c, fixed, p: c.x };
   const dt = performance.now() - t0; S.result = chosen; const U = evalTemplate(chosen.p, chosen.n, chosen.fixed);
-  // global-phase-aligned entrywise error
   const tr = Q.trace(Q.mul(Q.adj(S.target), U)); const ph = Math.atan2(tr[1], tr[0]); const Ualigned = Q.scale(U, Math.cos(-ph), Math.sin(-ph)); let err = 0; for (let i = 0; i < 16; i++) err = Math.max(err, Math.hypot(Ualigned.re[i] - S.target.re[i], Ualigned.im[i] - S.target.im[i]));
-  $('sInf').textContent = Q.fmt.sci(Math.max(chosen.f, 0), 2); $('sInfSub').textContent = `tolerance ${$('tol').options[$('tol').selectedIndex].text} · ${chosen.restarts} restart${chosen.restarts > 1 ? 's' : ''}`;
-  $('sStages').textContent = String(chosen.n); $('sStagesSub').textContent = chosen.fixed ? `native FSim(${chosen.fixed[0].toFixed(3)}, ${chosen.fixed[1].toFixed(3)})` : 'free (θ, φ) per stage';
-  $('sTime').textContent = dt < 1000 ? dt.toFixed(0) + ' ms' : (dt / 1000).toFixed(2) + ' s'; $('sTimeSub').textContent = `${iters} BFGS iterations over all stage counts`;
+  const iters = stages.reduce((a, st) => a + st.history.length, 0);
+  $('sInf').textContent = tiny(Math.max(chosen.f, 0)); $('sInfSub').textContent = `tolerance ${$('tol').options[$('tol').selectedIndex].text}, ${chosen.restarts} restart${chosen.restarts > 1 ? 's' : ''}`;
+  $('sStages').textContent = String(chosen.n); $('sStagesSub').textContent = chosen.fixed ? `calibrated FSim(${chosen.fixed[0].toFixed(3)}, ${chosen.fixed[1].toFixed(3)})` : 'free (θ, φ) per gate';
+  $('sTime').textContent = dt < 1000 ? dt.toFixed(0) + ' ms' : (dt / 1000).toFixed(2) + ' s'; $('sTimeSub').textContent = `${iters} BFGS iterations in total`;
   $('sErr').textContent = Q.fmt.sci(err, 1);
-  renderMatrix($('synthMatrix'), Ualigned); $('chipU').textContent = `unitary: ${Q.isUnitary(U, 1e-10) ? 'yes' : 'no'} · fidelity ${(1 - chosen.f).toFixed(10)}`;
+  renderMatrix($('synthMatrix'), Ualigned); $('chipU').textContent = `unitary to 10⁻¹⁰: ${Q.isUnitary(U, 1e-10) ? 'yes' : 'no'}`;
   renderCircuit(chosen); $('qasm').textContent = qasmText(chosen);
-  btn.disabled = false; btn.textContent = '⚡ Compile (stages 1 → 3)'; $('prog').style.width = '100%';
+  btn.disabled = false; btn.textContent = 'Decompose'; $('prog').style.width = '100%'; $('runStatus').textContent = '';
 }
 document.querySelectorAll('.preset').forEach(b => b.addEventListener('click', () => { document.querySelectorAll('.preset').forEach(x => x.classList.remove('active')); b.classList.add('active'); S.preset = b.dataset.p; setTarget(); run(); }));
 $('seed').addEventListener('input', () => { setTarget(); });
@@ -650,8 +718,12 @@ $('btnQasm').addEventListener('click', () => { if (!S.result) return; const a = 
 
 (async () => {
   readCal(); setTarget();
-  const t = synthesiseStage(PRESETS.iswap(), 1, null, 3, 1e-9, Q.rng(3)); const ok = t.f < 1e-8;
-  const el = $('selftest'); el.className = 'chip ' + (ok ? 'ok' : 'bad'); el.innerHTML = `<span class="dot"></span> self-test ${ok ? 'passed' : 'FAILED'}: iSWAP in 1 stage, 1−F = ${Q.fmt.sci(Math.max(t.f, 0), 1)}`;
+  // check: iSWAP is one free-angle FSim, and a CZ needs exactly two Sycamore gates
+  const iswap = await Q.offload(ENGINE, 'compileStages', [PRESETS.iswap(), null, 1e-9, 3]);
+  const cz = await Q.offload(ENGINE, 'compileStages', [PRESETS.cz(), [PI / 2, PI / 6], 1e-9, 3]);
+  const ok = iswap.chosen.n === 1 && iswap.chosen.ok && cz.chosen.n === 2 && cz.chosen.ok;
+  const el = $('selftest'); el.className = 'check ' + (ok ? 'ok' : 'bad');
+  el.textContent = ok ? `Checks passed: iSWAP is one free FSim (1 − F ${iswap.chosen.f < 1e-15 ? '< 10⁻¹⁵' : '= ' + Q.fmt.sci(iswap.chosen.f, 1)}), and CZ takes exactly two Sycamore gates, as in the Python tests.` : 'A check failed.';
   await run();
 })();
 })();

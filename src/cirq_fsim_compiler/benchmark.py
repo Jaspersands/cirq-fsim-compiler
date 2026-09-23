@@ -27,7 +27,7 @@ def run_compiler_benchmark(as_json: bool = False, quick: bool = False) -> int:
         (log.append(msg) if log is not None else print(msg))
 
     say("=" * 74)
-    say("NATIVE FSIM COMPILER BENCHMARK (v0.3): free angles vs calibrated native gate")
+    say("NATIVE FSIM COMPILER BENCHMARK (v0.4): free angles vs calibrated native gate")
     say("=" * 74)
     gates = {"CNOT": cirq.unitary(cirq.CNOT), "CZ": cirq.unitary(cirq.CZ), "iSWAP": cirq.unitary(cirq.ISWAP),
              "√iSWAP": cirq.unitary(cirq.SQRT_ISWAP), "SWAP": cirq.unitary(cirq.SWAP), "random U(4)": haar_random_unitary(4, seed=7)}

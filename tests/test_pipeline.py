@@ -45,7 +45,7 @@ def has_fsim(circuit):
 
 
 def test_version():
-    assert __version__ == "0.3.0"
+    assert __version__ == "0.4.0"
 
 
 def test_decomposition_to_cirq_ops_reproduces_unitary():

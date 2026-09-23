@@ -40,7 +40,7 @@ from .toffoli_decomposer import (
 from .openqasm3_io import export_to_openqasm3, parse_openqasm3
 from .batch_compiler import BatchFSimCompiler
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = [
     "fsim_matrix_np", "single_qubit_zxz_np", "euler_zxz_from_unitary", "haar_random_unitary", "FSimCircuitTemplate",
     "DifferentiableFSimSynthesizer", "DecompositionResult", "synthesize_unitary_to_fsim", "process_fidelity", "SEED_ANGLES",
