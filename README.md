@@ -7,7 +7,7 @@ Decompose two-qubit gates into FSim interactions and compile circuits for tunabl
 
 Superconducting processors with tunable couplers implement the fermionic-simulation gate FSim(θ, φ). This package finds decompositions of any two-qubit unitary into FSim gates and single-qubit rotations. The FSim angles can be free, or fixed to the one gate a calibrated coupler performs. As a Cirq transformer it compiles whole circuits, merges runs of gates on the same qubit pair, routes onto a coupling graph, and reads and writes OpenQASM 3.
 
-[Interactive page](web/index.html): the decomposition in the browser, with synthesis in a background worker and OpenQASM export of the fitted angles.
+[Interactive page](https://fsim.jaspersands.com/): the decomposition in the browser, with synthesis in a background worker and OpenQASM export of the fitted angles.
 
 ## The decomposition
 
