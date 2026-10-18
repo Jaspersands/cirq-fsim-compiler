@@ -5,7 +5,32 @@ A ``CouplerCalibration`` holds the measured native FSim angles (θ_cal, φ_cal)
 of one coupler; ``SycamoreCalibrationMap`` stores them per edge and can be
 perturbed with Gaussian drift to emulate day-to-day calibration changes. The
 synthesiser consumes these through ``decompose(..., calibration=...)`` so the
-compiled circuit uses the gate the hardware actually implements.
+compiled circuit uses the gate the hardware implements.
+
+Three gate families have constructors:
+
+* ``CouplerCalibration.sycamore()``: FSim(π/2, π/6), Google Sycamore.
+* ``CouplerCalibration.sqrt_iswap()``: FSim(π/4, 0). This equals cirq.SQRT_ISWAP_INV
+  and is locally equivalent to cirq.SQRT_ISWAP.
+* ``CouplerCalibration.cz()``: FSim(0, π). With this package's (and Cirq's)
+  convention FSim(θ, φ)[3, 3] = e^{−iφ}, FSim(0, π) = diag(1, 1, 1, −1) is
+  exactly cirq.CZ, not only up to single-qubit gates. CZ is the native gate
+  on Google Willow and on neutral-atom processors.
+
+``gate_error`` is the process infidelity of one native two-qubit gate, used
+by noise-aware synthesis. The constructors set it from published figures,
+converted where needed. For two qubits (d = 4), an average gate infidelity
+r corresponds to a process infidelity of (d + 1)/d · r = 5/4 · r.
+
+* Sycamore: 0.62%, the mean simultaneous two-qubit Pauli error in Arute et
+  al., Nature 574, 505 (2019). A Pauli error is already a process
+  infidelity, so it is used as is.
+* Willow CZ: 0.41%. The Willow spec sheet (Google Quantum AI, 2024) gives a
+  mean simultaneous CZ error of 0.33% from randomized benchmarking, an
+  average gate infidelity; 5/4 · 0.33% = 0.41%.
+* √iSWAP: 0.86%. Huang et al., PRL 130, 070601 (2023) report a mean SQiSW
+  fidelity of 99.31% from interleaved fully randomized benchmarking, an
+  average gate fidelity; 5/4 · 0.69% = 0.86%.
 """
 
 from __future__ import annotations
@@ -18,6 +43,13 @@ import numpy as np
 SYCAMORE_THETA = np.pi / 2.0
 SYCAMORE_PHI = np.pi / 6.0
 SQRT_ISWAP_THETA = np.pi / 4.0
+CZ_THETA = 0.0
+CZ_PHI = np.pi
+
+#: Published two-qubit gate errors as process infidelities (sources and conversions in the module docstring).
+SYCAMORE_GATE_ERROR = 0.0062
+WILLOW_CZ_ERROR = 1.25 * 0.0033
+SQRT_ISWAP_GATE_ERROR = 1.25 * 0.0069
 
 
 @dataclass
@@ -28,25 +60,36 @@ class CouplerCalibration:
     phi_cal: float = SYCAMORE_PHI
     depolarizing_error: float = 0.004
     cz_phase_error: float = 0.01
+    gate_error: Optional[float] = None
 
     @property
     def angles(self) -> Tuple[float, float]:
         return (float(self.theta_cal), float(self.phi_cal))
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> Dict[str, Optional[float]]:
         return asdict(self)
 
     @classmethod
     def sycamore(cls) -> "CouplerCalibration":
-        return cls(theta_cal=SYCAMORE_THETA, phi_cal=SYCAMORE_PHI)
+        return cls(theta_cal=SYCAMORE_THETA, phi_cal=SYCAMORE_PHI, gate_error=SYCAMORE_GATE_ERROR)
 
     @classmethod
     def sqrt_iswap(cls) -> "CouplerCalibration":
-        return cls(theta_cal=SQRT_ISWAP_THETA, phi_cal=0.0)
+        return cls(theta_cal=SQRT_ISWAP_THETA, phi_cal=0.0, gate_error=SQRT_ISWAP_GATE_ERROR)
+
+    @classmethod
+    def cz(cls) -> "CouplerCalibration":
+        """FSim(0, π), which equals cirq.CZ exactly."""
+        return cls(theta_cal=CZ_THETA, phi_cal=CZ_PHI, gate_error=WILLOW_CZ_ERROR)
 
 
 class SycamoreCalibrationMap:
-    """Per-edge calibration store; unknown edges get the nominal gate plus drift."""
+    """
+    Per-edge calibration store; unknown edges get the nominal gate plus drift.
+
+    Despite the name, ``nominal`` can be any calibration, for example
+    ``CouplerCalibration.cz()`` with zero drift for a CZ device.
+    """
 
     def __init__(self, seed: Optional[int] = None, theta_drift_std: float = 0.02, phi_drift_std: float = 0.015,
                  nominal: Optional[CouplerCalibration] = None):
@@ -71,6 +114,7 @@ class SycamoreCalibrationMap:
                 phi_cal=self.nominal.phi_cal + float(self.rng.normal(0.0, self.phi_drift_std)),
                 depolarizing_error=self.nominal.depolarizing_error,
                 cz_phase_error=self.nominal.cz_phase_error,
+                gate_error=self.nominal.gate_error,
             )
         return self.couplers[key]
 
@@ -83,6 +127,7 @@ class SycamoreCalibrationMap:
                 theta_cal=cal.theta_cal + float(rng.normal(0.0, self.theta_drift_std)),
                 phi_cal=cal.phi_cal + float(rng.normal(0.0, self.phi_drift_std)),
                 depolarizing_error=cal.depolarizing_error, cz_phase_error=cal.cz_phase_error,
+                gate_error=cal.gate_error,
             )
         return new
 

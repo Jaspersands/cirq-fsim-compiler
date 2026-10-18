@@ -4,7 +4,9 @@ Parameterised circuit templates for FSim-based two-qubit synthesis.
     U(p) = L_n · FSim(θ_n, φ_n) · L_{n−1} ⋯ FSim(θ_1, φ_1) · L_0,
     L_k  = R(α_k, β_k, γ_k) ⊗ R(α'_k, β'_k, γ'_k),   R = Rz(α) Rx(β) Rz(γ)
 
-with ``n_stages`` ∈ {1, 2, 3}. Angles may be free (``fixed_fsim=None``) or
+with ``n_stages`` from 0 to 6 (zero stages is a single layer of
+single-qubit gates, used for local targets and as the cheapest
+approximation). Angles may be free (``fixed_fsim=None``) or
 frozen to calibrated native values (``fixed_fsim=[(θ, φ), …]``), in which case
 only the single-qubit layers are optimised — the situation on real hardware,
 where the coupler exposes one native gate (e.g. Sycamore's FSim(π/2, π/6)).
@@ -28,6 +30,17 @@ except ImportError:  # pragma: no cover
     HAS_JAX = False
     jax = None
     jnp = np
+
+
+#: largest stage count a template accepts
+MAX_STAGES = 6
+
+
+def check_max_stages(max_stages) -> int:
+    """``max_stages`` as an int, or ValueError if it is not an integer from 0 to ``MAX_STAGES``."""
+    if isinstance(max_stages, bool) or not isinstance(max_stages, (int, np.integer)) or not 0 <= max_stages <= MAX_STAGES:
+        raise ValueError(f"max_stages must be an integer from 0 to {MAX_STAGES}, got {max_stages!r}")
+    return int(max_stages)
 
 
 # --------------------------------------------------------------------------- #
@@ -103,13 +116,14 @@ class FSimCircuitTemplate:
     """
     Parameters
     ----------
-    n_stages : number of FSim interactions (1–3)
+    n_stages : number of FSim interactions (0 to ``MAX_STAGES``; free angles never need more than 2,
+        CZ and √iSWAP need at most 3, Sycamore at most 4)
     fixed_fsim : optional list of ``n_stages`` (θ, φ) pairs to freeze
     """
 
     def __init__(self, n_stages: int = 2, fixed_fsim: Optional[Sequence[Tuple[float, float]]] = None):
-        if n_stages not in (1, 2, 3):
-            raise ValueError(f"n_stages must be 1, 2, or 3, got {n_stages}")
+        if not (isinstance(n_stages, (int, np.integer)) and 0 <= n_stages <= MAX_STAGES):
+            raise ValueError(f"n_stages must be an integer from 0 to {MAX_STAGES}, got {n_stages}")
         self.n_stages = int(n_stages)
         if fixed_fsim is not None:
             fixed_fsim = [(float(t), float(p)) for t, p in fixed_fsim]

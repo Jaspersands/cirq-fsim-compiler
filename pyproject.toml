@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cirq-fsim-compiler"
-version = "0.4.0"
-description = "Differentiable and Riemannian synthesis of two-qubit unitaries into calibrated FSim gates, a Cirq transformer with 3-qubit support, and OpenQASM 3 I/O"
+version = "0.5.0"
+description = "Numerical synthesis of two-qubit unitaries into free or calibrated FSim gates (Sycamore, sqrt-iSWAP, CZ), Weyl-chamber gate counts, noise-aware approximation, a Cirq transformer, OpenQASM 3 I/O, and a comparison with Cirq"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -28,6 +28,9 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
 ]
+figures = [
+    "matplotlib>=3.6",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -35,3 +38,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "slow: tests that take more than about 1.5 s (deselect with -m 'not slow')",
+]
+# an exact synthesis that misses its target is an error in the test suite
+filterwarnings = [
+    "error::cirq_fsim_compiler.riemannian_optimizer.SynthesisWarning",
+]

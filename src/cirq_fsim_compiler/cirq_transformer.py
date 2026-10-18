@@ -1,9 +1,15 @@
 """
 Cirq transformer that compiles any circuit to FSim + single-qubit gates.
 
-* Two-qubit gates that are not already ``FSimGate``/``PhasedFSimGate`` are
-  synthesised with :class:`DifferentiableFSimSynthesizer` (free angles or the
-  coupler's calibrated native gate when a ``SycamoreCalibrationMap`` is given).
+* Two-qubit gates are synthesised with :class:`DifferentiableFSimSynthesizer`
+  (free angles, or the coupler's calibrated native gate when a
+  ``calibration`` or ``SycamoreCalibrationMap`` is given). An ``FSimGate``
+  already in the input is kept only if it is the target gate: any FSim with
+  free angles, or exactly the edge's calibrated FSim. Everything else,
+  ``PhasedFSimGate`` included, is resynthesised.
+* Measurements must be terminal. A circuit with a measurement followed by
+  another operation on the same qubit raises ``ValueError``, because
+  compilation moves measurements to the end.
 * Gates on three or more qubits are first expanded with ``cirq.decompose`` to
   one- and two-qubit operations and then compiled.
 * With ``consolidate=True`` (default) every maximal run of operations on the
@@ -15,6 +21,19 @@ Cirq transformer that compiles any circuit to FSim + single-qubit gates.
   operation acts on a physical coupler; consolidation then folds each SWAP into
   its neighbouring gates where possible.
 * Identical two-qubit unitaries are synthesised once and cached.
+* ``calibration`` puts one native gate on every edge (for example
+  ``CouplerCalibration.cz()``); ``calibration_map`` gives each edge its own.
+* ``approximation="noise_aware"`` with a per-gate error ε lets each block use
+  fewer native gates when (1 − F) + n·ε is lower. The transformer records
+  each block's process infidelity e_i. ``infidelity_bound()`` returns
+  sin²(Σ arcsin √e_i). The angle arccos √F between Choi states obeys the
+  triangle inequality, so this bounds the process infidelity of the
+  compiled circuit against the circuit it implements block by block: the
+  input, or with ``device_graph`` the routed input, whose qubits end up
+  permuted (``last_routing["final_map"]``).
+* ``on_failure`` ("warn", "raise" or "ignore") is passed to the synthesiser
+  and decides what happens when a block misses ``target_infidelity`` in exact
+  synthesis.
 """
 
 from __future__ import annotations
@@ -24,6 +43,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from .riemannian_optimizer import DifferentiableFSimSynthesizer, DecompositionResult
+from .unitary_ansatz import check_max_stages, fsim_matrix_np
 from .calibration_map import SycamoreCalibrationMap, CouplerCalibration
 
 try:
@@ -74,47 +94,88 @@ class FSimDecomposerTransformer:
     ----------
     target_infidelity, max_stages : synthesis accuracy and depth budget
     calibration_map : if given, every edge uses its calibrated native gate
+    calibration : one native gate for every edge (ignored when ``calibration_map`` is given)
     method : ``"euclidean"`` or ``"riemannian"``
+    approximation : ``"exact"`` or ``"noise_aware"``
+    gate_error : per-gate process infidelity for noise-aware mode (else the coupler's ``gate_error``)
+    weyl_pruning : let the Weyl coordinates choose the first stage count
+    on_failure : "warn", "raise" or "ignore" when exact synthesis of a block misses the target
     """
 
     def __init__(
         self,
         target_infidelity: float = 1e-6,
-        max_stages: int = 3,
+        max_stages: int = 4,
         calibration_map: Optional[SycamoreCalibrationMap] = None,
         method: str = "euclidean",
         seed: int = 42,
         n_restarts: int = 4,
         consolidate: bool = True,
         device_graph=None,
+        calibration: Optional[CouplerCalibration] = None,
+        approximation: str = "exact",
+        gate_error: Optional[float] = None,
+        weyl_pruning: bool = True,
+        on_failure: str = "warn",
     ):
-        self.synthesizer = DifferentiableFSimSynthesizer(target_infidelity=target_infidelity, seed=seed, method=method)
-        self.max_stages = int(max_stages)
+        self.synthesizer = DifferentiableFSimSynthesizer(target_infidelity=target_infidelity, seed=seed, method=method,
+                                                         weyl_pruning=weyl_pruning, approximation=approximation,
+                                                         gate_error=gate_error, on_failure=on_failure)
+        self.max_stages = check_max_stages(max_stages)
         self.calibration_map = calibration_map
+        self.calibration = calibration
+        self.approximation = approximation
+        self.gate_error = gate_error
         self.n_restarts = int(n_restarts)
         self.consolidate = bool(consolidate)
         self.device_graph = device_graph
         self.last_routing = None
-        self._cache: Dict[Tuple[bytes, Optional[Tuple[float, float]]], DecompositionResult] = {}
-        self.stats = {"synthesised": 0, "cache_hits": 0, "native_kept": 0, "decomposed_multi_qubit": 0}
+        self._cache: Dict[Tuple, DecompositionResult] = {}
+        self.block_infidelities: List[float] = []
+        self.stats = {"synthesised": 0, "cache_hits": 0, "native_kept": 0, "decomposed_multi_qubit": 0,
+                      "approximated_blocks": 0, "gates_saved": 0}
 
     def __call__(self, circuit: "cirq.Circuit", *, context: Optional["cirq.TransformerContext"] = None) -> "cirq.Circuit":
         return self.optimize_circuit(circuit)
 
     def _calibration_for(self, q0, q1) -> Optional[CouplerCalibration]:
         if self.calibration_map is None:
-            return None
+            return self.calibration
         return self.calibration_map.get_coupler(_qubit_index(q0), _qubit_index(q1))
 
     def _synthesise(self, mat: np.ndarray, cal: Optional[CouplerCalibration]) -> DecompositionResult:
-        key = (np.round(mat, 10).tobytes(), None if cal is None else cal.angles)
+        key = (np.round(mat, 10).tobytes(), None if cal is None else cal.angles,
+               self.approximation, self.gate_error if self.gate_error is not None else (cal.gate_error if cal else None))
         if key in self._cache:
             self.stats["cache_hits"] += 1
-            return self._cache[key]
-        res = self.synthesizer.decompose(mat, max_stages=self.max_stages, n_restarts=self.n_restarts, calibration=cal)
-        self.stats["synthesised"] += 1
-        self._cache[key] = res
+            res = self._cache[key]
+        else:
+            res = self.synthesizer.decompose(mat, max_stages=self.max_stages, n_restarts=self.n_restarts, calibration=cal)
+            self.stats["synthesised"] += 1
+            self._cache[key] = res
+        self.block_infidelities.append(float(res.infidelity))
+        if res.approximate:
+            self.stats["approximated_blocks"] += 1
+            self.stats["gates_saved"] += int(res.exact_n_stages - res.n_stages)
         return res
+
+    def _is_target_native(self, op: "cirq.Operation") -> bool:
+        """An FSimGate that is already the target gate on this edge (any FSim in free-angle mode)."""
+        if not isinstance(op.gate, cirq.FSimGate) or cirq.is_parameterized(op.gate):
+            return False
+        cal = self._calibration_for(*op.qubits)
+        if cal is None:
+            return True
+        return bool(np.allclose(cirq.unitary(op.gate), fsim_matrix_np(*cal.angles), atol=1e-9))
+
+    def infidelity_bound(self) -> float:
+        """
+        Upper bound on the process infidelity of the last compiled circuit
+        against the circuit it implements block by block (the input, or the
+        routed input when ``device_graph`` was given).
+        """
+        angle = float(np.sum(np.arcsin(np.sqrt(np.clip(self.block_infidelities, 0.0, 1.0)))))
+        return float(np.sin(min(angle, np.pi / 2)) ** 2)
 
     def _compile_op(self, op: "cirq.Operation", out: List["cirq.Operation"]) -> None:
         n = len(op.qubits)
@@ -122,7 +183,7 @@ class FSimDecomposerTransformer:
             out.append(op)
             return
         if n == 2:
-            if isinstance(op.gate, (cirq.FSimGate, cirq.PhasedFSimGate)):
+            if self._is_target_native(op):
                 self.stats["native_kept"] += 1
                 out.append(op)
                 return
@@ -161,7 +222,27 @@ class FSimDecomposerTransformer:
                              "swaps": sum(1 for op in routed.all_operations() if op.gate == cirq.SWAP)}
         return routed
 
+    @staticmethod
+    def _check_supported(circuit: "cirq.Circuit") -> None:
+        """Only unitary operations, resets and terminal measurements can be compiled."""
+        for op in circuit.all_operations():
+            if cirq.control_keys(op):
+                raise ValueError(f"{op} is classically controlled; block merging would move it relative to the "
+                                 "measurement it depends on, so classically controlled operations are not supported. "
+                                 "Split the circuit at the measurement and compile the parts.")
+            if cirq.is_measurement(op) or isinstance(op.gate, cirq.ResetChannel):
+                continue
+            if not cirq.has_unitary(op):
+                raise ValueError(f"{op} is not a unitary operation (nor a measurement or reset), so it cannot be "
+                                 "synthesised. Remove noise channels and resolve parameters before compiling.")
+
     def optimize_circuit(self, circuit: "cirq.Circuit") -> "cirq.Circuit":
+        self.block_infidelities = []
+        self._check_supported(circuit)
+        if not circuit.are_all_measurements_terminal():
+            raise ValueError("the circuit has a measurement followed by other operations on the same qubit; "
+                             "compilation moves measurements to the end, so only terminal measurements are supported. "
+                             "Split the circuit at the measurement and compile the parts.")
         measurements = [op for op in circuit.all_operations() if cirq.is_measurement(op)]
         body = cirq.Circuit(op for op in circuit.all_operations() if not cirq.is_measurement(op))
         body = self._expand_multi_qubit(body)
@@ -176,7 +257,7 @@ class FSimDecomposerTransformer:
         for op in body.all_operations():
             if isinstance(op, cirq.CircuitOperation):
                 inner = list(op.mapped_circuit().all_operations())
-                if len(op.qubits) == 2 and len(inner) == 1 and isinstance(inner[0].gate, (cirq.FSimGate, cirq.PhasedFSimGate)):
+                if len(op.qubits) == 2 and len(inner) == 1 and self._is_target_native(inner[0]):
                     self.stats["native_kept"] += 1
                     ops.append(inner[0])
                     continue
@@ -200,16 +281,22 @@ if HAS_CIRQ:
         *,
         context: Optional["cirq.TransformerContext"] = None,
         target_infidelity: float = 1e-6,
-        max_stages: int = 3,
+        max_stages: int = 4,
         calibration_map: Optional[SycamoreCalibrationMap] = None,
         method: str = "euclidean",
         consolidate: bool = True,
         device_graph=None,
+        calibration: Optional[CouplerCalibration] = None,
+        approximation: str = "exact",
+        gate_error: Optional[float] = None,
+        on_failure: str = "warn",
     ) -> "cirq.Circuit":
         """``cirq.transformer``-compatible entry point."""
         tr = FSimDecomposerTransformer(target_infidelity=target_infidelity, max_stages=max_stages,
                                        calibration_map=calibration_map, method=method,
-                                       consolidate=consolidate, device_graph=device_graph)
+                                       consolidate=consolidate, device_graph=device_graph,
+                                       calibration=calibration, approximation=approximation, gate_error=gate_error,
+                                       on_failure=on_failure)
         return tr.optimize_circuit(cirq.Circuit(circuit))
 
 else:  # pragma: no cover
@@ -223,12 +310,18 @@ def compile_circuit_to_sycamore_fsim(
     target_infidelity: float = 1e-6,
     calibration_map: Optional[SycamoreCalibrationMap] = None,
     method: str = "euclidean",
-    max_stages: int = 3,
+    max_stages: int = 4,
     consolidate: bool = True,
     device_graph=None,
+    calibration: Optional[CouplerCalibration] = None,
+    approximation: str = "exact",
+    gate_error: Optional[float] = None,
+    on_failure: str = "warn",
 ) -> "cirq.Circuit":
     """Compile ``circuit`` to FSim + single-qubit gates (optionally routed onto ``device_graph``)."""
     tr = FSimDecomposerTransformer(target_infidelity=target_infidelity, max_stages=max_stages,
                                    calibration_map=calibration_map, method=method,
-                                   consolidate=consolidate, device_graph=device_graph)
+                                   consolidate=consolidate, device_graph=device_graph,
+                                   calibration=calibration, approximation=approximation, gate_error=gate_error,
+                                   on_failure=on_failure)
     return tr.optimize_circuit(circuit)

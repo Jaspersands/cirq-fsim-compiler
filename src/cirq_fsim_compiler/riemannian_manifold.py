@@ -22,7 +22,7 @@ from typing import List, Optional, Sequence, Tuple
 import numpy as np
 import scipy.linalg
 
-from .unitary_ansatz import fsim_matrix_np, euler_zxz_from_unitary, haar_random_unitary
+from .unitary_ansatz import fsim_matrix_np, euler_zxz_from_unitary, haar_random_unitary, MAX_STAGES
 
 try:
     import jax
@@ -36,6 +36,9 @@ except ImportError:  # pragma: no cover
     jnp = np
 
 _PAULI = np.array([np.eye(2), [[0, 1], [1, 0]], [[0, -1j], [1j, 0]], [[1, 0], [0, -1]]], dtype=np.complex128)
+
+#: jitted Riemannian gradients keyed by (n_stages, fixed angles), shared by all solver instances
+_GRAD_CACHE: dict = {}
 
 
 def lie_element(a: np.ndarray) -> np.ndarray:
@@ -59,7 +62,7 @@ class RiemannianFSimSolver:
     """
     Parameters
     ----------
-    n_stages : FSim stages (1–3)
+    n_stages : FSim stages (0 to ``MAX_STAGES``)
     fixed_fsim : freeze the FSim angles (calibrated mode) or None for free angles
     step : initial step size
     max_iter : iterations per restart
@@ -67,8 +70,8 @@ class RiemannianFSimSolver:
 
     def __init__(self, n_stages: int, fixed_fsim: Optional[Sequence[Tuple[float, float]]] = None,
                  step: float = 0.3, max_iter: int = 600, tol: float = 1e-14, seed: int = 0):
-        if n_stages not in (1, 2, 3):
-            raise ValueError("n_stages must be 1, 2 or 3")
+        if not (0 <= int(n_stages) <= MAX_STAGES):
+            raise ValueError(f"n_stages must be from 0 to {MAX_STAGES}")
         self.n_stages = int(n_stages)
         self.fixed = None if fixed_fsim is None else [(float(t), float(p)) for t, p in fixed_fsim]
         self.step = float(step)
@@ -76,7 +79,14 @@ class RiemannianFSimSolver:
         self.tol = float(tol)
         self.rng = np.random.default_rng(seed)
         self.n_blocks = 2 * (self.n_stages + 1)
-        self._grad = self._build_jax() if HAS_JAX else None
+        self._grad = None
+        if HAS_JAX:
+            key = (self.n_stages, None if self.fixed is None else tuple(self.fixed))
+            if key not in _GRAD_CACHE:
+                if len(_GRAD_CACHE) > 256:
+                    _GRAD_CACHE.clear()
+                _GRAD_CACHE[key] = self._build_jax()
+            self._grad = _GRAD_CACHE[key]
 
     # ----------------------------------------------------------------- #
     def unitary(self, blocks: List[np.ndarray], angles: np.ndarray) -> np.ndarray:
@@ -205,6 +215,6 @@ class RiemannianFSimSolver:
         return DecompositionResult(
             n_stages=self.n_stages, infidelity=float(max(0.0, val)), fidelity=float(min(1.0, fid)), optimal_params=params,
             fsim_angles=fsim_angles, single_qubit_angles=sq, synthesized_unitary=U, target_unitary=target,
-            is_success=bool(val <= target_infidelity * 10), native=self.fixed is not None, method="riemannian",
+            is_success=bool(val <= target_infidelity), native=self.fixed is not None, method="riemannian",
             loss_history=hist, n_restarts_used=used,
         )

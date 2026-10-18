@@ -1,10 +1,11 @@
 """
 cirq_fsim_compiler
 ==================
-Differentiable and Riemannian synthesis of two-qubit unitaries into FSim
-interactions — with free angles or a coupler's calibrated native gate — a Cirq
-transformer for whole circuits (three-qubit gates included), and correct
-OpenQASM 3 export/import.
+Numerical synthesis of two-qubit unitaries into FSim gates, with free angles
+or a coupler's calibrated native gate (Sycamore, √iSWAP, CZ); Weyl-chamber
+gate counts; noise-aware approximate synthesis; a Cirq transformer for whole
+circuits; OpenQASM 3 export and import; and a comparison with Cirq's built-in
+decompositions.
 """
 
 from .unitary_ansatz import (
@@ -20,6 +21,8 @@ from .riemannian_optimizer import (
     synthesize_unitary_to_fsim,
     process_fidelity,
     SEED_ANGLES,
+    SynthesisWarning,
+    SynthesisError,
 )
 from .riemannian_manifold import RiemannianFSimSolver, cayley_retract, lie_element
 from .cirq_transformer import (
@@ -28,7 +31,29 @@ from .cirq_transformer import (
     compile_to_fsim,
     convert_decomposition_to_cirq_ops,
 )
-from .calibration_map import SycamoreCalibrationMap, CouplerCalibration, SYCAMORE_THETA, SYCAMORE_PHI
+from .calibration_map import (
+    SycamoreCalibrationMap,
+    CouplerCalibration,
+    SYCAMORE_THETA,
+    SYCAMORE_PHI,
+    SYCAMORE_GATE_ERROR,
+    WILLOW_CZ_ERROR,
+    SQRT_ISWAP_GATE_ERROR,
+)
+from .weyl import (
+    weyl_coordinates,
+    fsim_weyl_coordinates,
+    class_fidelity,
+    min_cz_count,
+    min_sqrt_iswap_count,
+    min_free_fsim_count,
+    analytic_min_count,
+    numerical_min_count,
+    predict_stages,
+    native_gate_family,
+    cphase_strength,
+    minimum_count,
+)
 from .toffoli_decomposer import (
     decompose_toffoli_to_sycamore,
     decompose_fredkin_to_sycamore,
@@ -40,13 +65,18 @@ from .toffoli_decomposer import (
 from .openqasm3_io import export_to_openqasm3, parse_openqasm3
 from .batch_compiler import BatchFSimCompiler
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __all__ = [
     "fsim_matrix_np", "single_qubit_zxz_np", "euler_zxz_from_unitary", "haar_random_unitary", "FSimCircuitTemplate",
     "DifferentiableFSimSynthesizer", "DecompositionResult", "synthesize_unitary_to_fsim", "process_fidelity", "SEED_ANGLES",
+    "SynthesisWarning", "SynthesisError",
     "RiemannianFSimSolver", "cayley_retract", "lie_element",
     "FSimDecomposerTransformer", "compile_circuit_to_sycamore_fsim", "compile_to_fsim", "convert_decomposition_to_cirq_ops",
     "SycamoreCalibrationMap", "CouplerCalibration", "SYCAMORE_THETA", "SYCAMORE_PHI",
+    "SYCAMORE_GATE_ERROR", "WILLOW_CZ_ERROR", "SQRT_ISWAP_GATE_ERROR",
+    "weyl_coordinates", "fsim_weyl_coordinates", "class_fidelity", "min_cz_count", "min_sqrt_iswap_count",
+    "min_free_fsim_count", "analytic_min_count", "numerical_min_count", "predict_stages", "native_gate_family",
+    "cphase_strength", "minimum_count",
     "decompose_toffoli_to_sycamore", "decompose_fredkin_to_sycamore", "decompose_ccz_to_sycamore", "decompose_qft3_to_sycamore",
     "toffoli_circuit", "qft_unitary",
     "export_to_openqasm3", "parse_openqasm3",

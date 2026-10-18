@@ -14,6 +14,7 @@ from cirq_fsim_compiler.unitary_ansatz import (
     FSimCircuitTemplate,
     haar_random_unitary,
     euler_zxz_from_unitary,
+    MAX_STAGES,
 )
 from cirq_fsim_compiler.calibration_map import CouplerCalibration
 from cirq_fsim_compiler import riemannian_optimizer as ro
@@ -58,8 +59,9 @@ def test_template_param_counts_free_and_fixed():
     angles, sq = fixed.extract_angles(np.zeros(fixed.num_params()))
     assert angles == [SYCAMORE_ANGLES, SYCAMORE_ANGLES]
     assert len(sq) == 3 and len(sq[0]) == 2
+    assert FSimCircuitTemplate(n_stages=4, fixed_fsim=[SYCAMORE_ANGLES] * 4).num_params() == 5 * 6
     with pytest.raises(ValueError):
-        FSimCircuitTemplate(n_stages=4)
+        FSimCircuitTemplate(n_stages=MAX_STAGES + 1)
     with pytest.raises(ValueError):
         FSimCircuitTemplate(n_stages=2, fixed_fsim=[SYCAMORE_ANGLES])
 
@@ -140,3 +142,53 @@ def test_numpy_fallback_gradient_matches_jax(monkeypatch):
 def test_invalid_matrix_dimensions():
     with pytest.raises(ValueError):
         synthesize_unitary_to_fsim(np.eye(3))
+
+
+def test_controlled_phase_classes_use_the_analytic_two_gate_route():
+    import scipy.linalg
+    xx = np.kron([[0, 1], [1, 0]], [[0, 1], [1, 0]])
+    loc = np.kron(haar_random_unitary(2, seed=1), haar_random_unitary(2, seed=2))
+    cal = CouplerCalibration.sycamore()
+    syn = DifferentiableFSimSynthesizer(target_infidelity=1e-9, seed=0)
+    # a controlled-phase class at Weyl (0.189, 0, 0), conjugated by a random local gate; the optimiser alone
+    # converges slowly here, and the analytic route makes it exactly
+    for u in (cirq.unitary(cirq.CNOT), cirq.unitary(cirq.CZPowGate(exponent=0.3)),
+              loc @ scipy.linalg.expm(0.189j * xx) @ loc.conj().T):
+        r = syn.decompose(u, calibration=cal)
+        assert r.n_stages == 2 and r.infidelity < 1e-12 and "decompose_cphase_into_two_fsim" in r.method
+        assert all(np.allclose(a, SYCAMORE_ANGLES) for a in r.fsim_angles)
+        assert fid(r.synthesized_unitary, u) > 1 - 1e-12
+
+
+def test_failed_exact_synthesis_warns_or_raises():
+    weak = CouplerCalibration(theta_cal=0.1, phi_cal=0.05)        # two weak gates cannot make SWAP
+    u = cirq.unitary(cirq.SWAP)
+    with pytest.warns(ro.SynthesisWarning, match="not equivalent"):
+        r = DifferentiableFSimSynthesizer(target_infidelity=1e-9, seed=0).decompose(
+            u, calibration=weak, max_stages=2, n_restarts=2, max_iter=100)
+    assert r.infidelity > 1e-3
+    with pytest.raises(ro.SynthesisError):
+        DifferentiableFSimSynthesizer(target_infidelity=1e-9, seed=0, on_failure="raise").decompose(
+            u, calibration=weak, max_stages=2, n_restarts=2, max_iter=100)
+    with pytest.raises(ValueError):
+        DifferentiableFSimSynthesizer(on_failure="sometimes")
+
+
+def test_noise_aware_mode_does_not_warn_when_the_exact_candidate_misses():
+    import warnings
+    weak = CouplerCalibration(theta_cal=0.1, phi_cal=0.05)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        r = DifferentiableFSimSynthesizer(target_infidelity=1e-9, seed=0).decompose(
+            cirq.unitary(cirq.SWAP), calibration=weak, max_stages=2, n_restarts=2, max_iter=100,
+            approximation="noise_aware", gate_error=0.01)
+    assert not any(issubclass(w.category, ro.SynthesisWarning) for w in caught)
+    assert r.expected_infidelity == pytest.approx(r.infidelity + r.n_stages * 0.01, abs=1e-12)
+
+
+def test_max_stages_is_validated():
+    from cirq_fsim_compiler.cirq_transformer import FSimDecomposerTransformer
+    with pytest.raises(ValueError, match="max_stages must be an integer from 0 to 6"):
+        DifferentiableFSimSynthesizer().decompose(haar_random_unitary(4, seed=1), max_stages=7)
+    with pytest.raises(ValueError, match="max_stages"):
+        FSimDecomposerTransformer(max_stages=10)

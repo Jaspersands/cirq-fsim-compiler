@@ -57,7 +57,7 @@ def _synthesise_one(job: Tuple[np.ndarray, int, Optional[CouplerCalibration], in
 
 
 class BatchFSimCompiler:
-    def __init__(self, target_infidelity: float = 1e-5, max_stages: int = 3, n_workers: int = 1,
+    def __init__(self, target_infidelity: float = 1e-5, max_stages: int = 4, n_workers: int = 1,
                  calibration: Optional[CouplerCalibration] = None, method: str = "euclidean", seed: int = 42,
                  executor: Optional[str] = None):
         self.target_infidelity = float(target_infidelity)
@@ -106,7 +106,7 @@ class BatchFSimCompiler:
         return {
             "total_unitaries": len(results),
             "total_fsim_gates": int(sum(stages)),
-            "stage_histogram": {k: stages.count(k) for k in (1, 2, 3)},
+            "stage_histogram": {k: stages.count(k) for k in range(0, max(stages + [4]) + 1)},
             "mean_infidelity": float(np.mean([r.infidelity for r in results])) if results else 0.0,
             "max_infidelity": float(np.max([r.infidelity for r in results])) if results else 0.0,
             "success_rate": float(np.mean([1.0 if r.is_success else 0.0 for r in results])) if results else 0.0,

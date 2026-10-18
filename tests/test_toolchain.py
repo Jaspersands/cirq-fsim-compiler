@@ -155,6 +155,7 @@ def test_routing_puts_every_two_qubit_gate_on_a_coupler():
 # --------------------------------------------------------------------------- #
 # batch executors
 # --------------------------------------------------------------------------- #
+@pytest.mark.slow
 def test_batch_executors_agree():
     batch = [cirq.unitary(cirq.CZ), cirq.unitary(cirq.SWAP), cirq.unitary(cirq.ISWAP ** 0.5), cirq.unitary(cirq.CNOT)]
     cal = CouplerCalibration.sycamore()

@@ -45,7 +45,7 @@ def has_fsim(circuit):
 
 
 def test_version():
-    assert __version__ == "0.4.0"
+    assert __version__ == "0.5.0"
 
 
 def test_decomposition_to_cirq_ops_reproduces_unitary():
@@ -156,6 +156,7 @@ def test_openqasm3_handles_common_gates_and_rejects_unknown():
         export_to_openqasm3(cirq.Circuit(cirq.MatrixGate(np.eye(4)).on(q[0], q[1])))
 
 
+@pytest.mark.slow
 def test_batch_compiler_stats_and_workers():
     batch = [cirq.unitary(cirq.ISWAP), cirq.unitary(cirq.CZ), cirq.unitary(cirq.SWAP)]
     comp = BatchFSimCompiler(target_infidelity=1e-7, n_workers=2)
@@ -181,3 +182,75 @@ def test_cli_synthesize_and_toffoli(capsys, tmp_path):
     assert cli_main(["toffoli", "--qasm-out", str(qasm_path), "--json"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["fidelity"] > 1 - 1e-5 and qasm_path.exists()
+
+
+def test_input_fsim_is_kept_only_when_it_matches_the_edge_calibration():
+    q0, q1 = cirq.LineQubit.range(2)
+    syc_gate = cirq.FSimGate(np.pi / 2, np.pi / 6)
+    for consolidate in (False, True):
+        # a matching gate passes through
+        out = compile_to_fsim(cirq.Circuit(syc_gate.on(q0, q1)), calibration=CouplerCalibration.sycamore(),
+                              consolidate=consolidate)
+        assert list(out.all_operations()) == [syc_gate.on(q0, q1)]
+        # mismatched FSim and PhasedFSim gates are resynthesised on the calibrated gate
+        for gate, cal, native in [(cirq.FSimGate(0.5, 0.2), CouplerCalibration.cz(), cirq.CZ),
+                                  (syc_gate, CouplerCalibration.sqrt_iswap(), cirq.FSimGate(np.pi / 4, 0.0)),
+                                  (cirq.PhasedFSimGate(0.4, 0.1, 0.2, 0.3, 0.5), CouplerCalibration.cz(), cirq.CZ)]:
+            c = cirq.Circuit(gate.on(q0, q1))
+            out = compile_to_fsim(c, calibration=cal, target_infidelity=1e-9, consolidate=consolidate)
+            two = [op for op in out.all_operations() if len(op.qubits) == 2]
+            assert two and all(np.allclose(cirq.unitary(op.gate), cirq.unitary(native)) for op in two), (gate, consolidate)
+            assert fid(cirq.unitary(out), cirq.unitary(c)) > 1 - 1e-8
+
+
+def test_mid_circuit_measurement_is_rejected():
+    q0, q1 = cirq.LineQubit.range(2)
+    mid = cirq.Circuit(cirq.H(q0), cirq.measure(q0, key="m"), cirq.CNOT(q0, q1))
+    with pytest.raises(ValueError, match="measurement"):
+        compile_to_fsim(mid)
+    end = cirq.Circuit(cirq.H(q0), cirq.CNOT(q0, q1), cirq.measure(q0, q1, key="m"))
+    out = compile_to_fsim(end, calibration=CouplerCalibration.cz())
+    assert out.are_all_measurements_terminal() and cirq.is_measurement(list(out.all_operations())[-1])
+
+
+@pytest.mark.slow
+def test_every_suite_circuit_compiles_equivalently_in_exact_mode():
+    from cirq_fsim_compiler.compare import GATE_SETS, calibration_for, circuit_suite
+    for name, c in circuit_suite().items():
+        qs = sorted(c.all_qubits())
+        ideal = cirq.unitary(c)
+        for gs in GATE_SETS:
+            tr = FSimDecomposerTransformer(target_infidelity=1e-9, calibration=calibration_for(gs), on_failure="raise")
+            out = tr.optimize_circuit(c)
+            assert fid(out.unitary(qubit_order=qs), ideal) > 1 - 1e-8, (name, gs)
+
+
+def test_classically_controlled_and_non_unitary_operations_are_rejected():
+    q0, q1 = cirq.LineQubit.range(2)
+    for op in (cirq.X(q1).with_classical_controls("a"), cirq.CNOT(q0, q1).with_classical_controls("a")):
+        c = cirq.Circuit(cirq.H(q0), cirq.measure(q0, key="a"), op)
+        with pytest.raises(ValueError, match="classically controlled"):
+            compile_to_fsim(c)
+    with pytest.raises(ValueError, match="not a unitary"):
+        compile_to_fsim(cirq.Circuit(cirq.H(q0), cirq.depolarize(0.1).on(q0), cirq.CNOT(q0, q1)))
+
+
+def test_mid_circuit_reset_is_kept_in_place():
+    q0, q1 = cirq.LineQubit.range(2)
+    c = cirq.Circuit(cirq.H(q0), cirq.CNOT(q0, q1), cirq.reset(q0), cirq.H(q0), cirq.CNOT(q0, q1))
+    out = compile_to_fsim(c, calibration=CouplerCalibration.cz(), target_infidelity=1e-10)
+    sim = cirq.DensityMatrixSimulator()
+    rho = lambda circ: sim.simulate(circ, qubit_order=[q0, q1]).final_density_matrix
+    assert np.allclose(rho(out), rho(c), atol=1e-5)
+
+
+def test_calibrations_back_to_back_use_the_right_native_gate():
+    q0, q1 = cirq.LineQubit.range(2)
+    from cirq_fsim_compiler.unitary_ansatz import fsim_matrix_np, haar_random_unitary
+    target = cirq.MatrixGate(haar_random_unitary(4, seed=12)).on(q0, q1)
+    for cal in (CouplerCalibration.sycamore(), CouplerCalibration(theta_cal=1.5, phi_cal=0.6),
+                CouplerCalibration.sqrt_iswap(), CouplerCalibration.sycamore()):
+        out = compile_to_fsim(cirq.Circuit(target), calibration=cal, target_infidelity=1e-9)
+        two = [op for op in out.all_operations() if len(op.qubits) == 2]
+        assert two and all(np.allclose(cirq.unitary(op.gate), fsim_matrix_np(*cal.angles)) for op in two), cal.angles
+        assert fid(cirq.unitary(out), cirq.unitary(target)) > 1 - 1e-8
