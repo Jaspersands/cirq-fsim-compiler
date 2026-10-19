@@ -234,6 +234,25 @@ table.data td:first-child { font-family: var(--font-ui); font-size: 13px; }
 .wire::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--border-2); z-index: 0; }
 .wire .gate { position: relative; z-index: 1; min-width: 78px; text-align: center; }
 .wire .gate.fsim { min-width: 128px; text-align: center; }
+.results { display: grid; gap: 80px; padding: 40px 0 16px; max-width: 900px; }
+.results > * { min-width: 0; }
+.results code { overflow-wrap: anywhere; }
+.results h2, .tool-head h2 { font-family: var(--font-serif); font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+.prose { margin-top: 18px; }
+.prose p, .prose li { font-family: var(--font-serif); font-size: 17px; line-height: 1.65; color: var(--text-2); max-width: 68ch; }
+.prose p + p, .prose p + ul { margin-top: 14px; }
+.prose ul { margin: 0; padding-left: 20px; }
+.prose li { margin: 8px 0; }
+.results figure { margin-top: 32px; }
+.results figure + .prose { margin-top: 32px; }
+.table-scroll { overflow-x: auto; }
+.results table.data td, #weylTable td { font-family: var(--font-ui); font-size: 13px; }
+.results table.data th, .results table.data td { padding-right: 18px; vertical-align: top; }
+table.data.wide { min-width: 680px; }
+.tool-head { border-top: 1px solid var(--border); margin-top: 56px; padding-top: 56px; max-width: 860px; }
+.tool-head p { font-family: var(--font-serif); font-size: 17px; line-height: 1.65; color: var(--text-2); margin-top: 14px; max-width: 68ch; }
+.coords { font-family: var(--font-mono); font-size: 13px; color: var(--text); margin-bottom: 16px; }
+#weylTable tr.sel td { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -252,9 +271,117 @@ table.data td:first-child { font-family: var(--font-ui); font-size: 13px; }
 <main class="wrap">
   <section class="hero">
     <h1>Two-qubit gates from FSim interactions</h1>
-    <p>Superconducting processors with tunable couplers implement the fermionic-simulation gate FSim(θ, φ). Any two-qubit unitary can be built from at most three of them with single-qubit rotations in between. This page finds such a decomposition for a gate you choose, either with free angles or with the one gate a calibrated coupler actually performs, and writes the result as OpenQASM 3.</p>
+    <p>Superconducting processors with tunable couplers implement the fermionic-simulation gate FSim(θ, φ). cirq-fsim-compiler decomposes any two-qubit unitary into FSim gates and single-qubit rotations by numerical optimisation, either with free angles or with the one gate a calibrated coupler performs, and compiles whole Cirq circuits the same way.</p>
+    <p>The first part of this page summarises the results of version 0.5: how it compares with Cirq's own decompositions, and the fewest gates each target needs. The second part runs the decomposition in the browser for a gate you choose and writes the result as OpenQASM 3.</p>
     <p class="check" id="selftest">Running checks…</p>
   </section>
+
+  <section class="results" aria-label="Results">
+    <div>
+      <h2>Against Cirq's built-in decompositions</h2>
+      <div class="prose">
+        <p>Cirq decomposes any two-qubit unitary into CZ or √iSWAP gates in closed form. Those routines are exact, reach the minimum gate count and take one or two milliseconds. On those two gate sets this package gives the same counts and is slower: the median is 7.8 against 1.4 ms per target for CZ, and 11 against 0.7 ms for √iSWAP.</p>
+        <p>The difference is on a calibrated gate that is neither. On Sycamore's FSim(π/2, π/6) a generic two-qubit unitary takes three gates, against four from the cirq-core routine and six from <code>cirq_google</code>, which decomposes through CZ at two Sycamore gates per CZ.</p>
+      </div>
+      <figure>
+        <div class="table-scroll">
+          <table class="data wide">
+            <thead><tr><th>target</th><th>free FSim: ours / Cirq</th><th>Sycamore: ours / cirq_google / Cirq core</th><th>√iSWAP: ours / Cirq</th><th>CZ: ours / Cirq</th></tr></thead>
+            <tbody>
+              <tr><td>CNOT</td><td>1 / 1 [1]</td><td>2 / 2 / 2 [2]</td><td>2 / 2 [2]</td><td>1 / 1 [1]</td></tr>
+              <tr><td>CZ</td><td>1 / 1 [1]</td><td>2 / 2 / 2 [2]</td><td>2 / 2 [2]</td><td>1 / 1 [1]</td></tr>
+              <tr><td>iSWAP</td><td>1 / 2 [1]</td><td>3 / 3 / 4 [3]</td><td>2 / 2 [2]</td><td>2 / 2 [2]</td></tr>
+              <tr><td>√iSWAP</td><td>1 / 1 [1]</td><td>2 / 4 / 4 [2]</td><td>1 / 1 [1]</td><td>2 / 2 [2]</td></tr>
+              <tr><td>SWAP</td><td>1 / 3 [1]</td><td>3 / 3 / 4 [3]</td><td>3 / 3 [3]</td><td>3 / 3 [3]</td></tr>
+              <tr><td>CPhase(kπ/8)</td><td>1 / 1 [1]</td><td>2 / 2 / 2 [2]</td><td>2 / 2 [2]</td><td>2 / 2 [2]</td></tr>
+              <tr><td>Haar-random U(4)</td><td>2 / 2.21 [2]</td><td>3 / 6 / 4 [3]</td><td>2.21 / 2.21 [2.21]</td><td>3 / 3 [3]</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figcaption>Two-qubit gate counts, as the mean over each group, with the minimum in brackets. The targets are the named gates, CPhase(kπ/8) for k = 1 to 7, and 200 Haar-random unitaries (seed 2026). The Cirq baselines are <code>two_qubit_matrix_to_cz_operations</code>, <code>two_qubit_matrix_to_sqrt_iswap_operations</code>, <code>cirq_google.SycamoreTargetGateset</code>, and for Cirq core on Sycamore <code>decompose_cphase_into_two_fsim</code> on controlled-phase classes and <code>decompose_two_qubit_interaction_into_four_fsim_gates</code> otherwise.</figcaption>
+      </figure>
+      <figure>
+        <div class="table-scroll">
+          <table class="data wide">
+            <thead><tr><th>gate set</th><th>at the minimum</th><th>minimum known by</th><th>max process infidelity, ours / Cirq</th><th>median ms, ours / Cirq</th></tr></thead>
+            <tbody>
+              <tr><td>free FSim</td><td>100%</td><td>closed form</td><td>9e-15 / 1e-15</td><td>6.4 / 3.6</td></tr>
+              <tr><td>Sycamore</td><td>100%</td><td>exact regions</td><td>9e-15 / 2e-15</td><td>8.3 / 7.9 (cirq_google), 2.7 (core)</td></tr>
+              <tr><td>√iSWAP</td><td>100%</td><td>closed form</td><td>1e-12 / 2e-15</td><td>11 / 0.7</td></tr>
+              <tr><td>CZ</td><td>100%</td><td>closed form</td><td>6e-15 / 1e-15</td><td>7.8 / 1.4</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figcaption>Accuracy and speed over all 212 targets of each gate set. Times are the best of three calls after warm-up, from one run on a laptop that was also running other jobs; the ratios are more reliable than the absolute times.</figcaption>
+      </figure>
+      <div class="prose">
+        <p>Whole circuits go through <code>cirq.optimize_for_target_gateset</code> on the Cirq side, with all-to-all connectivity, and every compiled circuit is equivalent to its input. On CZ and √iSWAP the eleven-circuit suite takes 126 and 159 gates with either compiler, because Cirq also merges blocks there. On Sycamore it takes 171 gates, against 202 from <code>cirq_google</code> and 192 from the cirq-core baseline. The difference comes from the four random circuits, whose merged blocks are generic; on the other seven the counts are equal or the cirq-core baseline is one or two higher. With a per-gate error of 0.62%, the estimated circuit fidelity on Sycamore averages 0.909, against 0.894 and 0.899.</p>
+      </div>
+      <figure>
+        <div class="chart h-56"><canvas id="suiteChart"></canvas></div>
+        <figcaption>Sycamore gates per circuit in the suite. Toffoli, Fredkin, CCZ, QFT on three and four qubits, a four-qubit Cuccaro adder, a four-qubit GHZ circuit, and four random circuits on three and four qubits.</figcaption>
+      </figure>
+      <div class="prose">
+        <p>Where it does worse:</p>
+        <ul>
+          <li>Speed. Per two-qubit target, Cirq's analytic routines take 0.7 to 3.6 ms (median by gate set) and this package 6.4 to 11 ms; <code>cirq_google</code> takes 7.9 ms. For whole circuits the medians are 20 to 27 ms in exact mode and 35 to 83 ms in noise-aware mode, against 13 to 15 ms for Cirq and 20 ms for <code>cirq_google</code>.</li>
+          <li>Guarantees on Sycamore. Cirq's four-FSim routine uses four gates for every target, and that is guaranteed. This package's count is the proven minimum, but the decomposition at that count is found by search. The four-FSim routine is the fallback at four gates, and a result that misses the tolerance issues a <code>SynthesisWarning</code>; none did in this benchmark.</li>
+          <li>Exactness. Results are converged to a tolerance (here 1e-9; the worst case reached 1e-12), not to machine precision.</li>
+          <li>On CZ and √iSWAP there is no count advantage.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div>
+      <h2>Minimum counts from the Weyl chamber</h2>
+      <div class="prose">
+        <p>Every two-qubit gate is k₁ exp(i(x XX + y YY + z ZZ)) k₂ with single-qubit layers k₁ and k₂. The coordinates, canonicalised to π/4 ≥ x ≥ y ≥ |z|, label the gate up to single-qubit gates, and the fewest native gates that can make it depends only on them. Version 0.5 reads that number off before it searches and starts the search there. For CZ, √iSWAP and free angles it has a closed form.</p>
+      </div>
+      <figure>
+        <div class="table-scroll">
+          <table class="data">
+            <thead><tr><th>native gate</th><th>0</th><th>1</th><th>2</th><th>3</th></tr></thead>
+            <tbody>
+              <tr><td>CZ (or CNOT)</td><td>local</td><td>(π/4, 0, 0)</td><td>z = 0</td><td>otherwise</td></tr>
+              <tr><td>√iSWAP</td><td>local</td><td>(π/8, π/8, 0)</td><td>x − y ≥ |z|</td><td>otherwise</td></tr>
+              <tr><td>free FSim</td><td>local</td><td>x = y or y = |z|</td><td>otherwise</td><td>never needed</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figcaption>Minimum native-gate counts by Weyl coordinates. The CZ rule is the standard CNOT-count result (Vidal and Dawson 2004; Shende, Markov and Bullock 2004) and agrees with <code>cirq.num_cnots_required</code>. The √iSWAP rule is from Huang et al. 2023, where the two-gate region holds 79% of the Haar measure. With free angles two gates always suffice.</figcaption>
+      </figure>
+    </div>
+
+    <div>
+      <h2>Sycamore, exactly</h2>
+      <div class="prose">
+        <p>For any other fixed FSim the count comes from the monodromy polytope (Peterson, Crooks and Smith 2020). A target is made by n copies of a native gate exactly when there is a chain of n − 2 intermediate classes with every step inside the polytope, which is a set of linear inequalities. For FSim(0, φ) and FSim(π/2, φ) the regions have a closed form (Peterson, Bishop and Javadi-Abhari 2022); for every other angle the package solves small linear programs. Sycamore's gate is SWAP times a controlled phase of strength 5π/24, and three of them reach exactly the classes with x + y + |z| ≥ π/8.</p>
+      </div>
+      <figure>
+        <div class="table-scroll">
+          <table class="data">
+            <thead><tr><th>minimum Sycamore count</th><th>classes</th><th>Haar measure</th></tr></thead>
+            <tbody>
+              <tr><td>0</td><td>local</td><td>0</td></tr>
+              <tr><td>1</td><td>(π/4, π/4, π/24)</td><td>0</td></tr>
+              <tr><td>2</td><td>z = 0 and x + y ≤ 5π/12</td><td>0</td></tr>
+              <tr><td>3</td><td>every other class with x + y + |z| ≥ π/8</td><td>1 − 1.3746 × 10⁻⁴</td></tr>
+              <tr><td>4</td><td>z ≠ 0 and x + y + |z| &lt; π/8</td><td>1.3746 × 10⁻⁴, about 1 in 7,300</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figcaption>The Haar measure is the integral of the Haar density on the Weyl chamber (Watts, O'Connor and Vala 2013) over each region. 4 × 10⁶ Haar-random unitaries give 1.39 ± 0.06 × 10⁻⁴ for the four-gate region.</figcaption>
+      </figure>
+      <div class="prose">
+        <p>Four Sycamore gates are therefore needed only for weakly entangling classes with z ≠ 0 and x + y + |z| &lt; π/8, about 1 in 7,300 of the Haar measure. Cirq's four-FSim routine uses four gates for every target. This package uses three on everything else, and three is the minimum there. The last preset below, exp(i(0.1 XX + 0.05 YY + 0.02 ZZ)), lies in the four-gate region: its best three-gate fit has process infidelity 1.6e-2.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="tool-head">
+    <h2>Decompose a gate</h2>
+    <p>Choose a target and a native gate. The page reads the target's Weyl coordinates, gives the minimum counts from the rules above, and then searches upward from one gate until the tolerance is met, up to three gates, or four where the rules say four are needed. The package starts at the minimum; the page starts at one so that the curves show where fewer gates fall short.</p>
+  </div>
 
   <div class="layout">
     <aside class="sidebar stack">
@@ -263,6 +390,7 @@ table.data td:first-child { font-family: var(--font-ui); font-size: 13px; }
         <div class="presets">
           <button class="btn btn-sm preset active" data-p="cnot">CNOT</button><button class="btn btn-sm preset" data-p="cz">CZ</button><button class="btn btn-sm preset" data-p="iswap">iSWAP</button>
           <button class="btn btn-sm preset" data-p="sqrt_iswap">√iSWAP</button><button class="btn btn-sm preset" data-p="swap">SWAP</button><button class="btn btn-sm preset" data-p="random">Random U(4)</button>
+          <button class="btn btn-sm preset" data-p="cphase8">CPhase(π/8)</button><button class="btn btn-sm preset" data-p="sqrt_swap">√SWAP</button><button class="btn btn-sm preset" data-p="weak" title="exp(i(0.1 XX + 0.05 YY + 0.02 ZZ))">(.1, .05, .02)</button>
         </div>
         <div class="field" style="margin-top:10px">
           <div class="field-row"><span>Random seed</span><span class="val" id="vSeed">7</span></div>
@@ -280,6 +408,7 @@ table.data td:first-child { font-family: var(--font-ui); font-size: 13px; }
           <select id="calPreset" class="select">
             <option value="sycamore">Sycamore FSim(π/2, π/6)</option>
             <option value="sqrt_iswap">√iSWAP FSim(π/4, 0)</option>
+            <option value="cz">CZ FSim(0, π)</option>
             <option value="custom">Custom</option>
           </select>
         </div>
@@ -310,7 +439,13 @@ table.data td:first-child { font-family: var(--font-ui); font-size: 13px; }
       </div>
 
       <div class="panel">
-        <div class="panel-head"><div><div class="panel-title">Convergence for one, two and three gates</div><div class="panel-note">Best restart for each gate count. A curve that levels off far above the tolerance means that many gates cannot express the target.</div></div><div class="stage-row tags" id="stageChips"></div></div>
+        <div class="panel-head"><div><div class="panel-title">Weyl coordinates and minimum counts</div><div class="panel-note">The target's class up to single-qubit gates, and the fewest native gates that can make it, from the closed-form rules above rather than from the search. The row in colour is the gate set in use.</div></div></div>
+        <p class="coords" id="weylCoords"></p>
+        <div class="table-scroll"><table class="data" id="weylTable"><thead><tr><th>native gate</th><th>minimum</th><th>why</th></tr></thead><tbody></tbody></table></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><div><div class="panel-title">Convergence for each gate count</div><div class="panel-note">Best restart for each gate count. A curve that levels off far above the tolerance means that many gates cannot express the target.</div></div><div class="stage-row tags" id="stageChips"></div></div>
         <div class="chart h-64"><canvas id="lossChart"></canvas></div>
       </div>
 
@@ -336,8 +471,10 @@ table.data td:first-child { font-family: var(--font-ui); font-size: 13px; }
           <li><b>Template.</b> L<sub>n</sub>·FSim(θ<sub>n</sub>, φ<sub>n</sub>)·…·FSim(θ₁, φ₁)·L₀ with L<sub>k</sub> = (Rz·Rx·Rz) ⊗ (Rz·Rx·Rz), six angles per layer. FSim(θ, φ) = [[1, 0, 0, 0], [0, cos θ, −i sin θ, 0], [0, −i sin θ, cos θ, 0], [0, 0, 0, e<sup>−iφ</sup>]] in Cirq's convention.</li>
           <li><b>Loss.</b> 1 − |Tr(U<sub>target</sub>†U)|²/16, which ignores the global phase.</li>
           <li><b>Optimiser.</b> BFGS with backtracking and numerical gradients, up to six restarts per gate count. With free angles the first restarts start from CZ-like, √iSWAP, iSWAP and Sycamore angles. It runs in a Web Worker. The Python package uses L-BFGS-B with JAX gradients on the same loss, and also offers a Riemannian solver on U(2)⁴.</li>
+          <li><b>Weyl coordinates.</b> From the eigenvalues of U<sub>B</sub><sup>T</sup>U<sub>B</sub>, with U<sub>B</sub> the target in the magic basis after scaling to determinant one, then mapped into π/4 ≥ x ≥ y ≥ |z| with Cirq's convention. The minimum counts use the closed forms above, and for FSim(0, φ) and FSim(π/2, φ) couplers the closed-form regions of Peterson, Bishop and Javadi-Abhari. For other fixed angles the package solves linear programs over the monodromy polytope; this page does not. On the presets, 40 Haar-random targets and 20 random FSim products the coordinates agree with the package to 10⁻¹⁵, and the counts agree on every target.</li>
           <li><b>Calibrated mode.</b> The FSim angles are constants, and only the 6(n + 1) single-qubit angles are optimised. This is why a CZ needs two Sycamore gates and a SWAP needs three.</li>
           <li><b>Random unitaries.</b> Gram–Schmidt on a complex Gaussian matrix with random column phases (Haar measure), seeded for reproducibility.</li>
+          <li><b>Not on this page.</b> The package's noise-aware mode, which uses fewer gates when the approximation error is smaller than the error of the gates it saves, and the comparison with Cirq, which runs in Python (<code>cirq-fsim compare</code>).</li>
           <li><b>OpenQASM.</b> Written from the fitted angles. <code>gate fsim</code> is defined with standard gates, as exp(−iθ/2 (XX + YY)) followed by cp(−φ), so any OpenQASM 3 simulator can run the file. The Python package also parses OpenQASM 3 back into Cirq and compiles three-qubit gates with two-qubit block consolidation and routing.</li>
         </ul>
       </details>
@@ -345,7 +482,7 @@ table.data td:first-child { font-family: var(--font-ui); font-size: 13px; }
   </div>
 </main>
 
-<footer class="site-footer"><div class="wrap"><span>cirq-fsim-compiler 0.4 · Jasper Sands · Apache-2.0</span><span>Python: Cirq, JAX, SciPy. This page: plain JavaScript and Chart.js.</span></div></footer>
+<footer class="site-footer"><div class="wrap"><span>cirq-fsim-compiler 0.5 · Jasper Sands · Apache-2.0</span><span>Python: Cirq, JAX, SciPy. This page: plain JavaScript and Chart.js.</span></div></footer>
 
 <script id="engine">
 /* ---------------------------------------------------------------------------
@@ -605,8 +742,84 @@ const PRESETS = {
   cnot: () => Q.fromRows([[1,0,0,0],[0,1,0,0],[0,0,0,1],[0,0,1,0]]), cz: () => Q.fromRows([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,-1]]),
   iswap: () => Q.fromRows([[1,0,0,0],[0,0,[0,1],0],[0,[0,1],0,0],[0,0,0,1]]), sqrt_iswap: () => Q.fromRows([[1,0,0,0],[0,Math.SQRT1_2,[0,Math.SQRT1_2],0],[0,[0,Math.SQRT1_2],Math.SQRT1_2,0],[0,0,0,1]]),
   swap: () => Q.fromRows([[1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]), random: seed => haar4(seed),
+  cphase8: () => Q.fromRows([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,[Math.cos(PI / 8), Math.sin(PI / 8)]]]),
+  sqrt_swap: () => Q.fromRows([[1,0,0,0],[0,[0.5,0.5],[0.5,-0.5],0],[0,[0.5,-0.5],[0.5,0.5],0],[0,0,0,1]]),
+  // exp(i(0.1 XX + 0.05 YY + 0.02 ZZ)): needs four Sycamore gates (x + y + |z| < pi/8 with z != 0)
+  weak: () => Q.expm(Q.fromRows([[[0,0.02],0,0,[0,0.05]],[0,[0,-0.02],[0,0.15],0],[0,[0,0.15],[0,-0.02],0],[[0,0.05],0,0,[0,0.02]]])),
 };
 const SEEDS = [[0, PI], [PI / 4, 0], [PI / 2, 0], [PI / 2, PI / 6]];
+
+// ---------------------------------------------------------------- Weyl chamber and minimum counts
+// Ports of cirq_fsim_compiler.weyl: canonical coordinates pi/4 >= x >= y >= |z| (z >= 0 when x = pi/4),
+// the closed-form counts for free FSim, CZ and sqrt-iSWAP, and the closed-form n-gate regions of
+// FSim(0, phi) and FSim(pi/2, phi) (Peterson, Bishop and Javadi-Abhari 2022), which include Sycamore.
+const Q4 = PI / 4;
+const MAGIC = (() => { const h = Math.SQRT1_2; return Q.fromRows([[h, 0, 0, [0, h]], [0, [0, h], h, 0], [0, [0, h], -h, 0], [h, 0, 0, [0, -h]]]); })();
+function transpose(A) { const C = Q.zeros(A.m, A.n); for (let i = 0; i < A.n; i++) for (let j = 0; j < A.m; j++) { C.re[j * A.n + i] = A.re[i * A.m + j]; C.im[j * A.n + i] = A.im[i * A.m + j]; } return C; }
+function det4(A) { const n = 4, re = Array.from(A.re), im = Array.from(A.im); let dr = 1, di = 0;
+  for (let c = 0; c < n; c++) {
+    let p = c, best = -1; for (let r = c; r < n; r++) { const m = Math.hypot(re[r * n + c], im[r * n + c]); if (m > best) { best = m; p = r; } }
+    if (best === 0) return [0, 0];
+    if (p !== c) { for (let k = 0; k < n; k++) { [re[c * n + k], re[p * n + k]] = [re[p * n + k], re[c * n + k]]; [im[c * n + k], im[p * n + k]] = [im[p * n + k], im[c * n + k]]; } dr = -dr; di = -di; }
+    const pr = re[c * n + c], pi = im[c * n + c], q = pr * pr + pi * pi; [dr, di] = [dr * pr - di * pi, dr * pi + di * pr];
+    for (let r = c + 1; r < n; r++) { const fr = (re[r * n + c] * pr + im[r * n + c] * pi) / q, fi = (im[r * n + c] * pr - re[r * n + c] * pi) / q;
+      for (let k = c; k < n; k++) { const ar = re[c * n + k], ai = im[c * n + k]; re[r * n + k] -= fr * ar - fi * ai; im[r * n + k] -= fr * ai + fi * ar; } }
+  }
+  return [dr, di]; }
+/** Any interaction vector (x, y, z) into the Weyl chamber: pi/2 shifts, permutations, paired sign flips. */
+function canonicalize(v) {
+  const c = v.map(t => t - (PI / 2) * Math.round(t / (PI / 2))).sort((a, b) => Math.abs(b) - Math.abs(a));
+  let [x, y, z] = c; if (x < 0) { x = -x; z = -z; } if (y < 0) { y = -y; z = -z; } if (Math.abs(x - Q4) < 1e-9 && z < 0) z = -z;
+  return [x, y, z]; }
+/** Canonical (x, y, z) of a 4x4 unitary from the spectrum of U_B^T U_B in the magic basis. */
+function weylCoords(U) {
+  const [dr, di] = det4(U), r = Math.pow(Math.hypot(dr, di), -0.25), a = -Math.atan2(di, dr) / 4;
+  const UB = Q.mul(Q.mul(Q.adj(MAGIC), Q.scale(U, r * Math.cos(a), r * Math.sin(a))), MAGIC), M = Q.mul(transpose(UB), UB);
+  // M is normal: its Hermitian and anti-Hermitian parts commute, so one generic combination shares its eigenvectors.
+  const H = Q.add(Q.scale(Q.add(M, Q.adj(M)), 0.5), Q.scale(Q.add(M, Q.adj(M), -1), 0, -0.5), 0.6180339887);
+  const E = Q.eigh(H).V, d = [];
+  for (let k = 0; k < 4; k++) { let sr = 0, si = 0;
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { const er = E.re[i * 4 + k], ei = -E.im[i * 4 + k], mr = M.re[i * 4 + j], mi = M.im[i * 4 + j], fr = E.re[j * 4 + k], fi = E.im[j * 4 + k];
+      const tr = er * mr - ei * mi, ti = er * mi + ei * mr; sr += tr * fr - ti * fi; si += tr * fi + ti * fr; }
+    d.push(Math.atan2(si, sr) / 2); }
+  let s = d[0] + d[1] + d[2] + d[3];
+  while (s > PI / 2) { const i = d.indexOf(Math.max(...d)); d[i] -= PI; s -= PI; }
+  while (s < -PI / 2) { const i = d.indexOf(Math.min(...d)); d[i] += PI; s += PI; }
+  return canonicalize([(d[0] + d[2]) / 2, (d[1] + d[2]) / 2, (d[0] + d[1]) / 2]); }
+const PERMS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]], EVEN_SIGNS = [[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]];
+/** Best process fidelity between the classes a and b over single-qubit layers (weyl.class_fidelity). */
+function classFidelity(a, b) { let best = 0;
+  for (const p of PERMS) for (const sg of EVEN_SIGNS) for (let m = 0; m < 8; m++) {
+    const c = [0, 1, 2].map(i => sg[i] * b[p[i]] + ((m >> i) & 1) * PI / 2 - a[i]);
+    const f = (Math.cos(c[0]) * Math.cos(c[1]) * Math.cos(c[2])) ** 2 + (Math.sin(c[0]) * Math.sin(c[1]) * Math.sin(c[2])) ** 2; if (f > best) best = f; }
+  return Math.min(1, best); }
+function fsimCoords(th, ph) { return canonicalize([-th / 2, -th / 2, -ph / 4]); }
+function nativeFamily(th, ph, atol = 1e-9) { const c = fsimCoords(th, ph), near = v => c.every((t, i) => Math.abs(t - v[i]) <= atol);
+  if (near([0, 0, 0])) return 'identity'; if (near([Q4, 0, 0])) return 'cz'; if (near([PI / 8, PI / 8, 0])) return 'sqrt_iswap';
+  if (Math.abs(c[1]) <= atol && Math.abs(c[2]) <= atol) return 'cphase'; if (Math.abs(c[0] - Q4) <= atol && Math.abs(c[1] - Q4) <= atol) return 'swap_cphase';
+  return 'generic'; }
+function cphaseStrength(th, ph) { const f = nativeFamily(th, ph), c = fsimCoords(th, ph); return f === 'cz' || f === 'cphase' ? c[0] : f === 'swap_cphase' ? Q4 - Math.abs(c[2]) : null; }
+/** n controlled phases of strength s (with swap, SWAP times them) reach the class a (monodromy.xx_region_contains). */
+function xxRegionContains(a, n, s, swap, tol = 1e-8) { let [x, y, z] = a; if (swap) [x, y, z] = [Q4 - Math.abs(z), Q4 - y, Q4 - x]; z = Math.abs(z);
+  const total = n * s, largest = n >= 1 ? s : 0, second = n >= 2 ? s : 0;
+  return x + y + z <= total + tol && -x + y + z <= total - 2 * largest + tol && z <= total - largest - second + tol; }
+const isZero = (a, tol) => a.every(t => Math.abs(t) <= tol);
+function minCz(a, tol = 1e-8) { if (isZero(a, tol)) return 0; if (isZero([a[0] - Q4, a[1], a[2]], tol)) return 1; return Math.abs(a[2]) <= tol ? 2 : 3; }
+function minSqrtIswap(a, tol = 1e-8) { if (isZero(a, tol)) return 0; if (isZero([a[0] - PI / 8, a[1] - PI / 8, a[2]], tol)) return 1; return a[0] - a[1] + tol >= Math.abs(a[2]) ? 2 : 3; }
+function minFree(a, tol = 1e-8) { if (isZero(a, tol)) return 0; return Math.abs(a[0] - a[1]) <= tol || Math.abs(a[1] - Math.abs(a[2])) <= tol ? 1 : 2; }
+/** Minimum native-gate count where a closed form is known (weyl.predict_stages); exact is null otherwise. */
+function predictStages(a, fixed, tol = 1e-8) {
+  const inf = Math.max(tol * tol, 1e-12);
+  if (1 - classFidelity(a, [0, 0, 0]) <= inf) return { exact: 0, family: fixed ? nativeFamily(fixed[0], fixed[1]) : 'free' };
+  if (!fixed) return { exact: Math.max(1, minFree(a, tol)), family: 'free' };
+  const [th, ph] = fixed, family = nativeFamily(th, ph), one = 1 - classFidelity(a, fsimCoords(th, ph)) <= inf;
+  if (family === 'cz' || family === 'sqrt_iswap') return { exact: one ? 1 : Math.max(2, (family === 'cz' ? minCz : minSqrtIswap)(a, tol)), family };
+  if (one && family !== 'identity') return { exact: 1, family };
+  if (family === 'cphase' || family === 'swap_cphase') { const s = cphaseStrength(th, ph);
+    for (let n = 2; n <= 6; n++) if (xxRegionContains(a, n, s, family === 'swap_cphase' && n % 2 === 1, tol)) return { exact: n, family, s };
+    return { exact: null, family, s }; }
+  return { exact: null, family };  // a generic FSim: the package solves linear programs over the monodromy polytope
+}
 
 // ---------------------------------------------------------------- synthesis
 function synthesiseStage(target, n, fixed, restarts, tol, rng) {
@@ -624,17 +837,18 @@ function synthesiseStage(target, n, fixed, restarts, tol, rng) {
 function angles(p, n, fixed) { const out = { sq: [[p[0], p[1], p[2]], [p[3], p[4], p[5]]], fsim: [], layers: [[[p[0], p[1], p[2]], [p[3], p[4], p[5]]]] }; let idx = 6;
   for (let s = 0; s < n; s++) { if (fixed) out.fsim.push(fixed); else { out.fsim.push([p[idx], p[idx + 1]]); idx += 2; } out.layers.push([[p[idx], p[idx + 1], p[idx + 2]], [p[idx + 3], p[idx + 4], p[idx + 5]]]); idx += 6; } return out; }
 
-/** Try 1, 2, 3 FSim gates until the tolerance is met; progress reports each gate count. */
+/** Try 1, 2, 3 FSim gates (4 when the Weyl chamber says four are needed) until the tolerance is met; progress reports each gate count. */
 function compileStages(target, fixed, tol, seed, onProgress) {
   const rng = Q.rng(1000 + seed); const stages = []; let chosen = null;
-  for (let n = 1; n <= 3; n++) {
+  const maxN = predictStages(weylCoords(target), fixed).exact === 4 ? 4 : 3;
+  for (let n = 1; n <= maxN; n++) {
     const best = synthesiseStage(target, n, fixed, 6, tol, rng);
     const entry = { n, f: best.f, history: best.history, x: Array.from(best.x), restarts: best.restarts, ok: best.f < tol };
     stages.push(entry); onProgress(stages.slice());
     if (!chosen || best.f < chosen.f) chosen = entry;
     if (entry.ok) { chosen = entry; break; }
   }
-  return { stages, chosen };
+  return { stages, chosen, maxN };
 }
 </script>
 <script>
@@ -645,16 +859,50 @@ const $ = id => document.getElementById(id);
 
 // ---------------------------------------------------------------- UI
 Q.chartDefaults(); const C = Q.css;
-const S = { preset: 'cnot', seed: 7, target: null, result: null };
+const S = { preset: 'cnot', seed: 7, target: null, result: null, cal: [PI / 2, PI / 6] };
 const lossChart = new Chart($('lossChart'), { type: 'line', data: { labels: [], datasets: [] }, options: { scales: { x: Q.axis('BFGS iteration'), y: Q.axis('1 − F', { type: 'logarithmic' }) } } });
-const stageColors = [C('--muted-2'), C('--amber'), C('--accent')];
+const stageColors = [C('--muted-2'), C('--amber'), C('--accent'), C('--text-2')];
 const tiny = f => (f < 1e-15 ? '< 10⁻¹⁵' : Q.fmt.sci(f, 2));
 const DARK = false;
 function phaseColor(re, im) { const h = (Math.atan2(im, re) * 180 / PI + 360) % 360; return DARK ? `hsl(${h.toFixed(0)}, 45%, 70%)` : `hsl(${h.toFixed(0)}, 50%, 36%)`; }
 function renderMatrix(el, M) { el.innerHTML = ''; for (let i = 0; i < 16; i++) { const re = M.re[i], im = M.im[i], mag = Math.hypot(re, im); const d = document.createElement('div'); d.className = 'cell' + (mag < 1e-9 ? ' dim' : ''); d.textContent = mag < 1e-9 ? '0' : mag.toFixed(3); if (mag >= 1e-9) d.style.color = phaseColor(re, im); d.title = `${re.toFixed(5)} ${im >= 0 ? '+' : '−'} ${Math.abs(im).toFixed(5)}i`; el.appendChild(d); } }
-function fixedAngles() { if (!$('native').checked) return null; return [+$('th').value, +$('ph').value]; }
-function readCal() { const pre = $('calPreset').value; if (pre === 'sycamore') { $('th').value = PI / 2; $('ph').value = PI / 6; } else if (pre === 'sqrt_iswap') { $('th').value = PI / 4; $('ph').value = 0; } $('vTh').textContent = (+$('th').value).toFixed(4); $('vPh').textContent = (+$('ph').value).toFixed(4); }
-function setTarget() { S.seed = +$('seed').value; $('vSeed').textContent = S.seed; S.target = PRESETS[S.preset](S.seed); renderMatrix($('targetMatrix'), S.target); }
+// Preset couplers keep their exact angles; the sliders snap to steps of 1e-4.
+const CAL_PRESETS = { sycamore: [PI / 2, PI / 6], sqrt_iswap: [PI / 4, 0], cz: [0, PI] };
+function fixedAngles() { return $('native').checked ? S.cal.slice() : null; }
+function readCal() { const pre = $('calPreset').value; if (CAL_PRESETS[pre]) { S.cal = CAL_PRESETS[pre].slice(); $('th').value = S.cal[0]; $('ph').value = S.cal[1]; } else S.cal = [+$('th').value, +$('ph').value];
+  $('vTh').textContent = S.cal[0].toFixed(4); $('vPh').textContent = S.cal[1].toFixed(4); renderWeyl(); }
+function setTarget() { S.seed = +$('seed').value; $('vSeed').textContent = S.seed; S.target = PRESETS[S.preset](S.seed); renderMatrix($('targetMatrix'), S.target); S.coords = weylCoords(S.target); renderWeyl(); }
+
+// ---------------------------------------------------------------- Weyl coordinates and minimum counts
+const f3 = v => (Math.abs(v) < 5e-10 ? '0' : v.toFixed(3));
+const f4 = v => (Math.abs(v) < 5e-10 ? '0' : v.toFixed(4));
+/** Which closed-form condition decides the count, with the numbers for this target. */
+function why(gate, a, n, pred) {
+  const [x, y, z] = a, az = Math.abs(z), tol = 1e-8;
+  if (n === 0) return 'local: a product of single-qubit gates';
+  if (gate === 'free') return n === 1 ? (Math.abs(x - y) <= tol ? 'x = y' : 'y = |z|') : `x ≠ y and y ≠ |z|`;
+  if (gate === 'cz') return n === 1 ? 'the CNOT class (π/4, 0, 0)' : n === 2 ? 'z = 0' : `z = ${f3(z)}, not 0`;
+  if (gate === 'sqrt_iswap') return n === 1 ? 'the √iSWAP class (π/8, π/8, 0)' : n === 2 ? `x − y = ${f3(x - y)} ≥ |z| = ${f3(az)}` : `x − y = ${f3(x - y)} < |z| = ${f3(az)}`;
+  if (gate === 'sycamore') {
+    if (n === 1) return 'the Sycamore class (π/4, π/4, π/24)';
+    if (n === 2) return `z = 0 and x + y = ${f3(x + y)} ≤ 5π/12`;
+    if (n === 3) return az <= tol ? `z = 0 and x + y = ${f3(x + y)} > 5π/12` : `x + y + |z| = ${f3(x + y + az)} ≥ π/8 = ${f3(PI / 8)}`;
+    return `z ≠ 0 and x + y + |z| = ${f3(x + y + az)} < π/8 = ${f3(PI / 8)}`; }
+  if (pred.family === 'identity') return 'this FSim is local, so it cannot make an entangling gate';
+  if (pred.exact === null && pred.s !== undefined) return 'more than six gates';
+  if (pred.exact === null) return 'no closed form for these angles; the package solves the monodromy-polytope linear programs, which this page does not run';
+  if (n === 1) return 'the class of this FSim';
+  return `closed-form region for ${pred.family === 'cphase' || pred.family === 'cz' ? 'FSim(0, φ)' : 'FSim(π/2, φ)'}, controlled-phase strength s = ${f3(pred.s)}`;
+}
+function renderWeyl() {
+  if (!S.coords) return; const a = S.coords; $('weylCoords').textContent = `(x, y, z) = (${a.map(f4).join(', ')})`;
+  const fixed = fixedAngles(), pre = $('calPreset').value;
+  const rows = [['free', 'free FSim angles', null], ['cz', 'CZ = FSim(0, π)', CAL_PRESETS.cz], ['sqrt_iswap', '√iSWAP = FSim(π/4, 0)', CAL_PRESETS.sqrt_iswap], ['sycamore', 'Sycamore FSim(π/2, π/6)', CAL_PRESETS.sycamore]];
+  if (fixed && pre === 'custom') rows.push(['custom', `FSim(${fixed[0].toFixed(4)}, ${fixed[1].toFixed(4)})`, fixed]);
+  const sel = fixed ? pre : 'free';
+  $('weylTable').tBodies[0].innerHTML = rows.map(([key, label, ang]) => { const pred = predictStages(a, ang); const n = pred.exact;
+    return `<tr class="${key === sel ? 'sel' : ''}"><td>${label}</td><td>${n === null ? '–' : n}</td><td>${why(key, a, n, pred)}</td></tr>`; }).join('');
+}
 function gateBlock(text, cls) { const d = document.createElement('div'); d.className = 'gate ' + (cls || ''); d.textContent = text; return d; }
 function renderCircuit(res) {
   const el = $('circuit'); el.innerHTML = ''; const a = angles(res.p, res.n, res.fixed); const fmt = v => (Math.abs(v) < 5e-4 ? '0' : v.toFixed(3));
@@ -673,12 +921,13 @@ function showStages(stages) {
   lossChart.data.labels = Array.from({ length: Math.max(...stages.map(st => st.history.length)) }, (_, i) => i); lossChart.update();
   $('stageChips').innerHTML = '';
   for (const st of stages) { const chip = document.createElement('span'); chip.className = 'chip ' + (st.ok ? 'ok' : 'bad'); chip.textContent = `${st.n} gate${st.n > 1 ? 's' : ''}: ${tiny(Math.max(st.f, 0))}`; $('stageChips').appendChild(chip); }
-  $('prog').style.width = (stages.length * 33).toFixed(0) + '%';
+  $('prog').style.width = (100 * stages.length / S.maxN).toFixed(0) + '%';
 }
 let runId = 0;
 async function run() {
   const id = ++runId; const btn = $('btnRun'); btn.disabled = true; btn.textContent = 'Decomposing…'; $('prog').style.width = '5%'; $('runStatus').textContent = 'running in a background worker';
   const fixed = fixedAngles(); const tol = +$('tol').value; const t0 = performance.now();
+  const pred = predictStages(S.coords, fixed); S.maxN = pred.exact === 4 ? 4 : 3;
   const { stages, chosen: c } = await Q.offload(ENGINE, 'compileStages', [S.target, fixed, tol, S.seed], st => { if (id === runId) showStages(st); });
   if (id !== runId) return;
   showStages(stages);
@@ -687,7 +936,8 @@ async function run() {
   const tr = Q.trace(Q.mul(Q.adj(S.target), U)); const ph = Math.atan2(tr[1], tr[0]); const Ualigned = Q.scale(U, Math.cos(-ph), Math.sin(-ph)); let err = 0; for (let i = 0; i < 16; i++) err = Math.max(err, Math.hypot(Ualigned.re[i] - S.target.re[i], Ualigned.im[i] - S.target.im[i]));
   const iters = stages.reduce((a, st) => a + st.history.length, 0);
   $('sInf').textContent = tiny(Math.max(chosen.f, 0)); $('sInfSub').textContent = `tolerance ${$('tol').options[$('tol').selectedIndex].text}, ${chosen.restarts} restart${chosen.restarts > 1 ? 's' : ''}`;
-  $('sStages').textContent = String(chosen.n); $('sStagesSub').textContent = chosen.fixed ? `calibrated FSim(${chosen.fixed[0].toFixed(3)}, ${chosen.fixed[1].toFixed(3)})` : 'free (θ, φ) per gate';
+  const minNote = pred.exact === null ? '' : chosen.ok && chosen.n === Math.max(1, pred.exact) ? ', the minimum' : `; the minimum is ${pred.exact}`;
+  $('sStages').textContent = String(chosen.n); $('sStagesSub').textContent = (chosen.fixed ? `calibrated FSim(${chosen.fixed[0].toFixed(3)}, ${chosen.fixed[1].toFixed(3)})` : 'free (θ, φ) per gate') + minNote;
   $('sTime').textContent = dt < 1000 ? dt.toFixed(0) + ' ms' : (dt / 1000).toFixed(2) + ' s'; $('sTimeSub').textContent = `${iters} BFGS iterations in total`;
   $('sErr').textContent = Q.fmt.sci(err, 1);
   renderMatrix($('synthMatrix'), Ualigned); $('chipU').textContent = `unitary to 10⁻¹⁰: ${Q.isUnitary(U, 1e-10) ? 'yes' : 'no'}`;
@@ -698,18 +948,31 @@ document.querySelectorAll('.preset').forEach(b => b.addEventListener('click', ()
 $('seed').addEventListener('input', () => { setTarget(); });
 $('seed').addEventListener('change', () => { if (S.preset === 'random') run(); });
 $('calPreset').addEventListener('change', readCal); ['th', 'ph'].forEach(id => $(id).addEventListener('input', () => { $('calPreset').value = 'custom'; readCal(); }));
-$('native').addEventListener('change', run); $('tol').addEventListener('change', run);
+$('native').addEventListener('change', () => { renderWeyl(); run(); }); $('tol').addEventListener('change', run);
 $('btnRun').addEventListener('click', run);
 $('btnQasm').addEventListener('click', () => { if (!S.result) return; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([qasmText(S.result)], { type: 'text/plain' })); a.download = `${S.preset}_${S.result.fixed ? 'native' : 'free'}_fsim.qasm`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 500); });
 
+// ---------------------------------------------------------------- circuit suite on Sycamore (README, compare_with_cirq.md)
+new Chart($('suiteChart'), { type: 'bar', data: {
+  labels: ['Toffoli', 'Fredkin', 'CCZ', 'QFT3', 'QFT4', 'adder', 'GHZ', 'rand 3q 1', 'rand 3q 2', 'rand 4q 1', 'rand 4q 2'],
+  datasets: [
+    { label: 'cirq_google', data: [10, 12, 10, 9, 18, 42, 6, 13, 16, 34, 32], backgroundColor: C('--muted-2') },
+    { label: 'Cirq core', data: [10, 12, 10, 10, 20, 42, 6, 14, 16, 26, 26], backgroundColor: C('--border-2') },
+    { label: 'this package', data: [10, 12, 10, 9, 18, 42, 6, 11, 13, 21, 19], backgroundColor: C('--accent') }] },
+  options: { categoryPercentage: 0.72, barPercentage: 0.9, plugins: { legend: { labels: { boxHeight: 8, boxWidth: 8 } } },
+    scales: { x: Q.axis('', { ticks: { color: C('--muted'), autoSkip: false, maxRotation: 0, font: { size: 10.5 } } }), y: Q.axis('Sycamore gates', { beginAtZero: true }) } } });
+
 (async () => {
   readCal(); setTarget();
-  // check: iSWAP is one free-angle FSim, and a CZ needs exactly two Sycamore gates
+  // check: iSWAP is one free-angle FSim, a CZ needs exactly two Sycamore gates, and the Weyl-chamber
+  // counts of the presets match cirq_fsim_compiler.weyl.predict_stages (free, CZ, sqrt-iSWAP, Sycamore)
   const iswap = await Q.offload(ENGINE, 'compileStages', [PRESETS.iswap(), null, 1e-9, 3]);
   const cz = await Q.offload(ENGINE, 'compileStages', [PRESETS.cz(), [PI / 2, PI / 6], 1e-9, 3]);
-  const ok = iswap.chosen.n === 1 && iswap.chosen.ok && cz.chosen.n === 2 && cz.chosen.ok;
+  const EXPECTED = { cnot: [1, 1, 2, 2], cz: [1, 1, 2, 2], iswap: [1, 2, 2, 3], sqrt_iswap: [1, 2, 1, 2], swap: [1, 3, 3, 3], cphase8: [1, 2, 2, 2], sqrt_swap: [1, 3, 3, 3], weak: [2, 3, 2, 4] };
+  const weylOk = Object.entries(EXPECTED).every(([k, e]) => { const a = weylCoords(PRESETS[k]()); return [null, CAL_PRESETS.cz, CAL_PRESETS.sqrt_iswap, CAL_PRESETS.sycamore].every((g, i) => predictStages(a, g).exact === e[i]); });
+  const ok = iswap.chosen.n === 1 && iswap.chosen.ok && cz.chosen.n === 2 && cz.chosen.ok && weylOk;
   const el = $('selftest'); el.className = 'check ' + (ok ? 'ok' : 'bad');
-  el.textContent = ok ? `Checks passed: iSWAP is one free FSim (1 − F ${iswap.chosen.f < 1e-15 ? '< 10⁻¹⁵' : '= ' + Q.fmt.sci(iswap.chosen.f, 1)}), and CZ takes exactly two Sycamore gates, as in the Python tests.` : 'A check failed.';
+  el.textContent = ok ? `Checks passed: iSWAP is one free FSim (1 − F ${iswap.chosen.f < 1e-15 ? '< 10⁻¹⁵' : '= ' + Q.fmt.sci(iswap.chosen.f, 1)}), CZ takes exactly two Sycamore gates, and the minimum counts of the eight presets match the Python package.` : 'A check failed.';
   await run();
 })();
 })();
