@@ -139,13 +139,19 @@ def test_stage_prediction():
     syc = CouplerCalibration.sycamore().angles
     haar = haar_random_unitary(4, seed=5)
     p = weyl.predict_stages(haar, fsim_angles=syc)
-    assert p.lower == 3 and p.exact is None                      # n = 1 and n = 2 are excluded exactly
+    assert p.lower == p.exact == 3 and p.source == "polytope"    # inside the three-gate region x + y + |z| ≥ π/8
+    bound = weyl.predict_stages(haar, fsim_angles=syc, polytope=False)
+    assert bound.lower == 3 and bound.exact is None and bound.source == "lower bound"   # n = 1, 2 excluded
     assert weyl.predict_stages(cirq.unitary(cirq.CZ), fsim_angles=syc).lower == 2
     assert weyl.predict_stages(fsim_matrix_np(*syc), fsim_angles=syc).exact == 1
     assert weyl.predict_stages(local(9), fsim_angles=syc).exact == 0
-    drifted = (syc[0] + 0.02, syc[1] - 0.01)                     # a generic gate: only a lower bound
-    assert weyl.predict_stages(haar, fsim_angles=drifted).lower == 2
+    drifted = (syc[0] + 0.02, syc[1] - 0.01)                     # a generic gate
+    assert weyl.predict_stages(haar, fsim_angles=drifted, polytope=False).lower == 2   # only the one-gate bound
+    d = weyl.predict_stages(haar, fsim_angles=drifted)
+    assert d.lower == d.exact == 3 and d.source == "polytope"
     assert weyl.predict_stages(haar, fsim_angles=None).exact == 2
+    weak = weyl.predict_stages(cirq.unitary(cirq.SWAP), fsim_angles=(0.1, 0.05), max_count=3)
+    assert weak.exact is None and weak.lower == 4                 # no region up to three gates contains SWAP
 
 
 def test_numerical_minimum_for_sycamore():
@@ -261,8 +267,10 @@ def test_three_sycamore_bound_is_attained():
 def test_zero_gate_label_uses_the_closed_form_infidelity():
     syc = CouplerCalibration.sycamore().angles
     small = cirq.unitary(cirq.CZPowGate(exponent=0.003))          # 0-gate infidelity 5.6e-6
-    assert weyl.predict_stages(small, fsim_angles=syc, tol=np.sqrt(1e-6)).exact is None
+    assert weyl.predict_stages(small, fsim_angles=syc, tol=np.sqrt(1e-6)).exact == 2      # not zero gates
+    assert weyl.predict_stages(small, fsim_angles=syc, tol=np.sqrt(1e-6), polytope=False).exact is None
     assert weyl.minimum_count(small, syc, tol=1e-6) == (2, "proven")
     assert weyl.predict_stages(small, fsim_angles=syc, tol=np.sqrt(1e-5)).exact == 0
     a = np.sqrt(2e-9 / 3)                                          # every coordinate below √ε, infidelity 2ε
-    assert weyl.predict_stages((a, a, a), fsim_angles=syc, tol=np.sqrt(1e-9)).exact is None
+    p = weyl.predict_stages((a, a, a), fsim_angles=syc, tol=np.sqrt(1e-9))
+    assert p.exact == 2 and p.source == "polytope"                # z < √ε, so the face z = 0 is within tolerance

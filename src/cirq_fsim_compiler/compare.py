@@ -190,7 +190,7 @@ def _timed(fn: Callable, repeat: int = 3):
 
 
 def reference_minimum(u: np.ndarray, gate_set: str) -> Tuple[Optional[int], str]:
-    """Minimum count and how it is known: "closed form", "proven" (lower bound met), "numerical" or "not found"."""
+    """Minimum count and how it is known: "closed form" or "proven" (the exact n-gate regions), else "not found"."""
     cal = calibration_for(gate_set)
     return weyl.minimum_count(u, None if cal is None else cal.angles)
 

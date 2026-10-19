@@ -8,7 +8,7 @@ Every U in U(4) can be written
 (``cirq.kak_decomposition``). The canonical interaction coefficients, with
 π/4 ≥ x ≥ y ≥ |z| and z ≥ 0 when x = π/4, label the local-equivalence class:
 two gates differ only by single-qubit gates exactly when their coordinates
-agree. This module uses them for four things.
+agree. This module uses them for five things.
 
 1. Closed-form minimum native-gate counts where they are known:
 
@@ -31,8 +31,9 @@ agree. This module uses them for four things.
 
 3. A prediction of the stage count before numerical synthesis
    (:func:`predict_stages`). The synthesiser uses it to skip stage counts
-   that cannot succeed. For a native gate outside the families above, the
-   prediction is only a lower bound. It uses the closed forms for zero and
+   that cannot succeed. For a native gate outside the families above it uses
+   the exact regions of item 4; with ``polytope=False`` the prediction is
+   only a lower bound. That bound uses the closed forms for zero and
    one gate, plus two rules for controlled-phase-type natives: FSim(0, φ),
    and FSim(π/2, φ), which is SWAP times a controlled phase of strength s
    (canonical coordinates (s, 0, 0)). Sycamore's FSim(π/2, π/6) is SWAP
@@ -63,10 +64,19 @@ agree. This module uses them for four things.
      excludes iSWAP (x + y = π/2), and three gates need x + y + |z| ≥ π/8.
      The tests check both bounds against random single-qubit layers.
 
-4. A numerical minimum for an arbitrary fixed FSim(θ, φ)
+4. The exact region that n copies of any fixed FSim(θ, φ) reach
+   (:func:`n_gate_region_contains`, :mod:`monodromy`), from the monodromy
+   polytope of Peterson, Crooks and Smith (2020). For controlled-phase-type
+   natives the region has a closed form (Peterson, Bishop and
+   Javadi-Abhari 2022); for other natives, such as a drifted coupler, it is
+   decided by linear programs. For Sycamore the three-gate region is exactly
+   x + y + |z| ≥ π/8, so the bound in item 3 is the whole answer: four gates
+   are needed exactly when z ≠ 0 and x + y + |z| < π/8.
+
+5. A numerical minimum for an arbitrary fixed FSim(θ, φ)
    (:func:`numerical_min_count`): multi-start synthesis at increasing stage
    counts with a strict tolerance. This is numerical evidence, not a proof.
-   A failure means many restarts all failed.
+   A failure means many restarts all failed. The tests use it to check item 4.
 """
 
 from __future__ import annotations
@@ -175,6 +185,19 @@ def class_fidelity(target: ArrayLike, native: ArrayLike) -> float:
     return float(min(1.0, f.max()))
 
 
+def haar_density(x, y, z):
+    """
+    Density of the Haar measure on the Weyl chamber, unnormalised:
+    |Π sin 2(c_i + c_j) sin 2(c_i − c_j)| over the pairs of coordinates
+    (Watts, O'Connor and Vala, Entropy 15, 1963 (2013)). The differences
+    2(c_i ± c_j) are those of the eigenphases of the magic-basis spectrum.
+    Over the chamber π/4 ≥ x ≥ y ≥ |z| it integrates to 0.0081812; the tests
+    check it against Haar-random sampling.
+    """
+    s = np.sin
+    return np.abs(s(2 * (x + y)) * s(2 * (x - y)) * s(2 * (x + z)) * s(2 * (x - z)) * s(2 * (y + z)) * s(2 * (y - z)))
+
+
 # --------------------------------------------------------------------------- #
 # Analytic minimum counts
 # --------------------------------------------------------------------------- #
@@ -276,14 +299,31 @@ def cphase_count_excluded(u_or_coords: ArrayLike, n: int, theta: float, phi: flo
     return total > n * s + tol
 
 
+def n_gate_region_contains(u_or_coords: ArrayLike, n: int, theta: float, phi: float, tol: float = 1e-9) -> bool:
+    """
+    True when n copies of FSim(θ, φ), with arbitrary single-qubit gates
+    between them, can make the target (module docstring, item 4). Exact up to
+    ``tol``: closed-form inequalities for FSim(0, φ) and FSim(π/2, φ),
+    linear programs over the monodromy polytope for every other native.
+    """
+    from . import monodromy
+
+    a = _coords(u_or_coords)
+    family = native_gate_family(theta, phi)
+    if family in ("cz", "cphase", "swap_cphase"):
+        return monodromy.xx_region_contains(a, n, cphase_strength(theta, phi),
+                                            swap=(family == "swap_cphase" and n % 2 == 1), tol=tol)
+    return monodromy.reachable(a, fsim_weyl_coordinates(theta, phi), n, tol=tol)
+
+
 def analytic_min_count(u_or_coords: ArrayLike, fsim_angles: Optional[Tuple[float, float]] = None,
                        atol: float = 1e-8) -> Optional[int]:
     """
     Closed-form minimum for free FSim (``fsim_angles=None``), CZ-class and
     √iSWAP-class native gates, and for targets that need zero or one native
-    gate. ``None`` when no closed form is known; use :func:`numerical_min_count`.
+    gate. ``None`` when no closed form is known; use :func:`minimum_count`.
     """
-    pred = predict_stages(u_or_coords, fsim_angles=fsim_angles, tol=atol)
+    pred = predict_stages(u_or_coords, fsim_angles=fsim_angles, tol=atol, polytope=False)
     return pred.exact
 
 
@@ -295,13 +335,14 @@ class StagePrediction:
     """What the Weyl coordinates say about the number of native gates."""
 
     lower: int                  # no decomposition with fewer native gates exists
-    exact: Optional[int]        # the minimum, when it is known in closed form
+    exact: Optional[int]        # the minimum, when it is known
     family: str                 # "free" or the native gate family
     coordinates: np.ndarray
+    source: str = "closed form"  # how it is known: "closed form", "polytope" (item 4) or "lower bound" (exact unknown)
 
 
 def predict_stages(u_or_coords: ArrayLike, fsim_angles: Optional[Tuple[float, float]] = None,
-                   tol: float = 1e-8) -> StagePrediction:
+                   tol: float = 1e-8, polytope: bool = True, max_count: int = 6) -> StagePrediction:
     """
     Lower bound and, where known, exact minimum number of native gates.
 
@@ -311,6 +352,12 @@ def predict_stages(u_or_coords: ArrayLike, fsim_angles: Optional[Tuple[float, fl
     the closed-form infidelity instead and accept up to ``tol²``. Synthesis
     to a process infidelity ε uses tol = √ε, because the infidelity grows as
     the squared coordinate distance.
+
+    For a fixed native without a closed form, ``polytope=True`` gives the
+    exact minimum from the n-gate regions (:func:`n_gate_region_contains`),
+    searched up to ``max_count``; a target outside every region up to
+    ``max_count`` gets ``lower = max_count + 1`` and ``exact = None``.
+    ``polytope=False`` gives only the lower bounds of item 3.
     """
     a = _coords(u_or_coords)
     inf_tol = max(tol * tol, 1e-12)
@@ -328,15 +375,20 @@ def predict_stages(u_or_coords: ArrayLike, fsim_angles: Optional[Tuple[float, fl
         count = min_cz_count if family == "cz" else min_sqrt_iswap_count
         n = 1 if one else max(2, count(a, tol))
         return StagePrediction(lower=n, exact=n, family=family, coordinates=a)
-    if family == "identity":
-        return StagePrediction(lower=1, exact=None, family=family, coordinates=a)
-    if one:
+    if one and family != "identity":
         return StagePrediction(lower=1, exact=1, family=family, coordinates=a)
+    if polytope:
+        for n in range(2, int(max_count) + 1):
+            if n_gate_region_contains(a, n, theta, phi, tol):
+                return StagePrediction(lower=n, exact=n, family=family, coordinates=a, source="polytope")
+        return StagePrediction(lower=int(max_count) + 1, exact=None, family=family, coordinates=a, source="polytope")
+    if family == "identity":
+        return StagePrediction(lower=1, exact=None, family=family, coordinates=a, source="lower bound")
     lower = 2
     if family in ("cphase", "swap_cphase"):
         while lower < 8 and cphase_count_excluded(a, lower, theta, phi, tol):
             lower += 1
-    return StagePrediction(lower=lower, exact=None, family=family, coordinates=a)
+    return StagePrediction(lower=lower, exact=None, family=family, coordinates=a, source="lower bound")
 
 
 # --------------------------------------------------------------------------- #
@@ -348,9 +400,9 @@ def numerical_min_count(u: ArrayLike, theta: float, phi: float, max_stages: int 
     Smallest n ≤ ``max_stages`` for which multi-start synthesis with the fixed
     FSim(θ, φ) reaches process infidelity ≤ ``tol``, or ``None``.
 
-    This is numerical. With ``use_weyl=True``, n = 0 and n = 1 are decided by
-    the closed forms, and n = 2 is skipped when the two-gate rule for
-    controlled-phase-type gates excludes it. All other stage counts are
+    This is numerical, and independent of the n-gate regions of item 4. With
+    ``use_weyl=True``, n = 0 and n = 1 are decided by the closed forms, and
+    the search starts at the lower bound of item 3. All other stage counts are
     decided by ``n_restarts`` L-BFGS runs, and a count is rejected only when
     every run ends above ``tol``.
     """
@@ -361,7 +413,7 @@ def numerical_min_count(u: ArrayLike, theta: float, phi: float, max_stages: int 
     u = _as_unitary(u)
     start = 0
     if use_weyl:
-        pred = predict_stages(u, fsim_angles=(theta, phi), tol=np.sqrt(tol))
+        pred = predict_stages(u, fsim_angles=(theta, phi), tol=np.sqrt(tol), polytope=False)
         if pred.exact is not None and pred.exact <= 1:
             return pred.exact
         start = pred.lower
@@ -375,17 +427,32 @@ def numerical_min_count(u: ArrayLike, theta: float, phi: float, max_stages: int 
 
 
 def minimum_count(u: ArrayLike, fsim_angles: Optional[Tuple[float, float]] = None, max_stages: int = 4,
-                  tol: float = 1e-9, **kwargs) -> Tuple[Optional[int], str]:
+                  tol: float = 1e-9, method: str = "polytope", **kwargs) -> Tuple[Optional[int], str]:
     """
-    Minimum native-gate count and how it is known: ``"closed form"``,
-    ``"proven"`` (the search met a proven lower bound), ``"numerical"``
-    (the search found it above every proven bound, so a smaller count is
-    excluded only numerically) or ``"not found"``. ``u`` may be a 4×4 unitary
+    Minimum native-gate count and how it is known. ``u`` may be a 4×4 unitary
     or Weyl coordinates.
+
+    ``"closed form"``: CZ, √iSWAP, free angles, or a target that needs zero
+    or one gate. ``"proven"``: with ``method="polytope"`` (the default), the
+    smallest n whose region (item 4) contains the target. ``"not found"``:
+    no region up to ``max_stages`` contains it, which the polytope shows to
+    be exact.
+
+    ``method="search"`` gives the older answer from multi-start synthesis
+    (:func:`numerical_min_count`, with ``kwargs``), upward from the lower
+    bound of item 3: ``"proven"`` when the search meets that bound,
+    ``"numerical"`` when it finds the count above every proven bound (so a
+    smaller count is excluded only numerically), ``"not found"`` when every
+    count up to ``max_stages`` failed.
     """
-    pred = predict_stages(u, fsim_angles=fsim_angles, tol=np.sqrt(tol))
-    if pred.exact is not None:
+    if method not in ("polytope", "search"):
+        raise ValueError("method must be 'polytope' or 'search'")
+    pred = predict_stages(u, fsim_angles=fsim_angles, tol=np.sqrt(tol), polytope=(method == "polytope"),
+                          max_count=max_stages)
+    if pred.source == "closed form":
         return pred.exact, "closed form"
+    if method == "polytope":
+        return (pred.exact, "proven") if pred.exact is not None else (None, "not found")
     n = numerical_min_count(u, *fsim_angles, max_stages=max_stages, tol=tol, **kwargs)
     if n is None:
         return None, "not found"

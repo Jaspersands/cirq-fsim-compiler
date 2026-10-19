@@ -10,6 +10,8 @@ Figures:
     weyl_choice.png        where those unitaries sit in the Weyl chamber (CZ and √iSWAP)
     circuits_sycamore.png  two-qubit counts for the circuit suite on Sycamore
     timing.png             wall-clock time per two-qubit decomposition
+    fsim_regions.png       the Sycamore four-gate region's Haar share, and two-gate shares on drifted couplers
+                           (reads benchmarks/results/fsim_regions.json from benchmarks/fsim_regions.py)
 """
 
 import argparse
@@ -192,9 +194,43 @@ def fig_timing(d, out):
     save(fig, os.path.join(out, "timing.png"))
 
 
+def fig_regions(r, out):
+    syc = r["sycamore"]
+    fig, (a, b) = plt.subplots(1, 2, figsize=(7.2, 2.9), gridspec_kw={"wspace": 0.32})
+    s, share = np.array(syc["cdf"]["s"]), np.array(syc["cdf"]["share_below"])
+    a.plot(s, share, color=COLOR["sycamore"])
+    a.set_yscale("log"); a.set_xscale("log")
+    a.axvline(np.pi / 8, color="#bbbbbb", lw=0.7, ls=(0, (2, 2)), zorder=0)
+    a.plot([np.pi / 8], [syc["four_gate_share"]], ls="none", marker="o", ms=4, color=COLOR["sycamore"])
+    a.annotate(f"x + y + |z| < π/8\n{1e4 * syc['four_gate_share']:.2f} × 10⁻⁴, four gates",
+               (np.pi / 8, syc["four_gate_share"]),
+               xytext=(8, -2), textcoords="offset points", fontsize=6.8, color="#444444", va="top")
+    a.set_xlabel("s"); a.set_ylabel("Haar share with x + y + |z| < s")
+    a.set_title("Sycamore: the four-gate region")
+    a.set_xlim(s[0], s[-1])
+    drift = r["drift"]
+    d = np.array([row["delta_theta"] for row in drift])
+    for n, mk in [("2", "o"), ("3", "s")]:
+        b.plot(d, [100 * row["shares"].get(n, 0.0) for row in drift], color=COLOR["sycamore"] if n == "2" else "#9a9a9a",
+               marker=mk, ms=3.6)
+    pair = r["pair_33_34"]
+    dp = abs(pair["native"][0] - np.pi / 2)
+    b.plot([dp], [100 * pair["shares"].get("2", 0.0)], ls="none", marker="D", ms=4.2, mfc="white", mew=1.0,
+           color=COLOR["sycamore"])
+    b.set_xlabel("|θ − π/2| (rad); φ = π/6 except the pair"); b.set_ylabel("Haar-random targets (%)")
+    b.set_title("Minimum count on a drifted coupler")
+    b.set_ylim(0, 100); b.set_xlim(left=0)
+    lab = dict(fontsize=7.2, color="#444444")
+    b.text(0.215, 66, "two gates", va="center", **lab)
+    b.text(0.215, 31, "three gates", va="center", **lab)
+    b.text(dp - 0.008, 95, "pair (3,3)–(3,4)", ha="right", va="center", **lab)
+    save(fig, os.path.join(out, "fsim_regions.png"))
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", default=os.path.join(HERE, "results", "compare_with_cirq.json"))
+    ap.add_argument("--regions", default=os.path.join(HERE, "results", "fsim_regions.json"))
     ap.add_argument("--out", default=os.path.join(ROOT, "figures"))
     args = ap.parse_args(argv)
     with open(args.results) as f:
@@ -205,6 +241,9 @@ def main(argv=None) -> int:
     fig_weyl(d, args.out)
     fig_circuits(d, args.out)
     fig_timing(d, args.out)
+    if os.path.exists(args.regions):
+        with open(args.regions) as f:
+            fig_regions(json.load(f), args.out)
     return 0
 
 

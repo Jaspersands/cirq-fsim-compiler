@@ -14,10 +14,10 @@ returning the minimum number of native applications that reaches the target.
 
 Stage search. With ``weyl_pruning=True`` (the default) the target's Weyl
 coordinates decide where the search starts (:func:`weyl.predict_stages`).
-When the minimum is known in closed form (free angles, CZ-class and
-√iSWAP-class natives), synthesis starts at that count. Otherwise it starts
-at the lowest count the coordinates allow, which is a proven lower bound.
-If the optimiser fails at that first count, it retries there once with
+The minimum is known for every native: in closed form for free angles,
+CZ-class and √iSWAP-class natives, and from the exact n-gate regions of the
+monodromy polytope for any other fixed FSim (:mod:`monodromy`). Synthesis
+starts at that count. If the optimiser fails at that first count, it retries there once with
 three times the restarts and five times the iterations, from new points.
 If that also fails, it moves to the next count. With ``weyl_pruning=False``
 the search starts at one stage, as in 0.4.
@@ -30,8 +30,8 @@ controlled-phase-class target (Weyl y = z = 0) with two native gates via
 native gate has 3π/8 ≤ |θ| ≤ 5π/8 and |φ| ≤ π/4 (Sycamore does). The first is
 tried before the optimiser at n = 2 for every calibration (Cirq's routine
 decides whether the native gate can make the controlled phase); the second
-only if the optimiser fails at n = 4. Three Sycamore gates do not cover the Weyl chamber, so n = 4 is
-part of the default search (``max_stages=4``).
+only if the optimiser fails at n = 4. Three Sycamore gates do not cover the Weyl chamber (they miss
+x + y + |z| < π/8 with z ≠ 0), so n = 4 is part of the default search (``max_stages=4``).
 
 Failure. If exact synthesis ends above ``target_infidelity``, the result is
 not equivalent to the target. ``on_failure`` decides what happens: "warn"
@@ -225,11 +225,13 @@ class DifferentiableFSimSynthesizer:
         return base, g
 
     # ----------------------------------------------------------------- #
-    def predict(self, target_unitary: np.ndarray, calibration: Optional[CouplerCalibration] = None) -> "weyl.StagePrediction":
-        """Weyl-chamber prediction used to choose the first stage count."""
+    def predict(self, target_unitary: np.ndarray, calibration: Optional[CouplerCalibration] = None,
+                max_count: int = 6) -> "weyl.StagePrediction":
+        """Weyl-chamber prediction used to choose the first stage count (exact counts searched up to ``max_count``)."""
         tol = np.sqrt(max(self.target_infidelity, 1e-16))
         angles = None if calibration is None else calibration.angles
-        return weyl.predict_stages(np.asarray(target_unitary, dtype=np.complex128), fsim_angles=angles, tol=tol)
+        return weyl.predict_stages(np.asarray(target_unitary, dtype=np.complex128), fsim_angles=angles, tol=tol,
+                                   max_count=max_count)
 
     def decompose(
         self,
@@ -285,7 +287,7 @@ class DifferentiableFSimSynthesizer:
         start = 1
         coords = weyl.weyl_coordinates(target_unitary) if calibration is not None else None
         if self.weyl_pruning:
-            pred = self.predict(target_unitary, calibration)
+            pred = self.predict(target_unitary, calibration, max_count=max_stages)
             predicted = pred.exact
             start = min(pred.exact if pred.exact is not None else pred.lower, max_stages)
         tol_c = np.sqrt(max(self.target_infidelity, 1e-16))

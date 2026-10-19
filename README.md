@@ -7,7 +7,7 @@ Decompose two-qubit gates into FSim interactions and compile circuits for tunabl
 
 Superconducting processors with tunable couplers implement the fermionic-simulation gate FSim(θ, φ) (Foxen et al. 2020). This package finds decompositions of any two-qubit unitary into FSim gates and single-qubit rotations by numerical optimisation. The FSim angles can be free, or fixed to the one gate a calibrated coupler performs: Sycamore's FSim(π/2, π/6), √iSWAP, or CZ = FSim(0, π), the native gate on Google's Willow and on neutral-atom processors (Evered et al. 2023). As a Cirq transformer it compiles whole circuits, merges runs of gates on the same qubit pair, routes onto a coupling graph, and reads and writes OpenQASM 3.
 
-Version 0.5 adds a comparison with Cirq's own decompositions, uses the Weyl chamber to predict gate counts before searching, and adds a noise-aware mode that uses fewer gates when the approximation error is smaller than the error of the gates it saves.
+Version 0.5 adds a comparison with Cirq's own decompositions, finds the exact minimum gate count for any fixed FSim before searching (from the Weyl chamber and the monodromy polytope), and adds a noise-aware mode that uses fewer gates when the approximation error is smaller than the error of the gates it saves.
 
 [Interactive page](https://fsim.jaspersands.com/): the decomposition in the browser, with synthesis in a background worker and OpenQASM export of the fitted angles.
 
@@ -28,9 +28,9 @@ $$U(p) = L_n\,\mathrm{FSim}(\theta_n,\varphi_n)\cdots \mathrm{FSim}(\theta_1,\va
 minimising $1 - |\mathrm{Tr}(U_t^\dagger U)|^2/16$ for increasing $n$ (up to 4 by default) and keeping the smallest $n$ that meets the tolerance.
 
 - With free angles, every standard gate (CNOT, CZ, iSWAP, √iSWAP, SWAP) takes one FSim, and a Haar-random unitary takes two.
-- With a calibrated coupler only the single-qubit layers are optimised. On Sycamore's FSim(π/2, π/6), CZ takes two gates and SWAP or a random unitary takes three; a small set of weakly entangling classes takes four (next section). On √iSWAP, iSWAP takes two. On CZ, SWAP takes three, and so does a random unitary.
+- With a calibrated coupler only the single-qubit layers are optimised. On Sycamore's FSim(π/2, π/6), CZ takes two gates and SWAP or a random unitary takes three; the weakly entangling classes with z ≠ 0 and x + y + |z| < π/8, 1.4 in 10⁴ of the Haar measure, take four (next section). On √iSWAP, iSWAP takes two. On CZ, SWAP takes three, and so does a random unitary.
 - There are two solvers for the same loss: L-BFGS-B on Euler angles with JAX gradients, and Riemannian descent that keeps every single-qubit layer exactly unitary through Cayley retractions. They agree to $10^{-8}$.
-- The stage search starts at the count predicted from the target's Weyl coordinates (next section) instead of at one. That count is a proven lower bound, so if the search fails there it retries once with three times the restarts and five times the iterations.
+- The stage search starts at the minimum count read from the target's Weyl coordinates (next section) instead of at one. That count is exact for every native gate, so if the search fails there it retries once with three times the restarts and five times the iterations.
 - Two analytic routes from Cirq are tried where they apply. For a controlled-phase class (Weyl y = z = 0), `cirq.decompose_cphase_into_two_fsim` is tried at two gates after a KAK change of basis, on every calibration, √iSWAP and drifted couplers included; Cirq's routine decides whether the native gate can make the controlled phase, and where it returns a circuit the circuit is exact. At four gates, `cirq.decompose_two_qubit_interaction_into_four_fsim_gates` is the fallback when the search fails.
 - If the result still misses the tolerance, the synthesiser and the transformer issue a `SynthesisWarning` that says the output is not equivalent to the target. With `on_failure="raise"` they raise `SynthesisError` instead.
 
@@ -48,15 +48,62 @@ Minimum native-gate counts in closed form:
 
 The CZ rule is the standard CNOT-count result (Vidal and Dawson 2004; Shende, Markov and Bullock 2004) and agrees with `cirq.num_cnots_required`. The √iSWAP rule is from Huang et al. 2023, where the two-gate region holds 79% of the Haar measure. The free-FSim rule follows from the FSim coordinates for one gate. Two gates always suffice because conjugating the second FSim by H⊗H swaps its XX and ZZ terms, and the two interaction vectors then add to any (x, y, z). The tests check the CZ and √iSWAP rules against Cirq, and the √iSWAP and free-FSim rules against multi-start synthesis, including points on the boundary x − y = |z|, where two √iSWAP still suffice.
 
-A general fixed FSim has no closed form here. Peterson, Crooks and Smith (2020) describe the exact regions through the monodromy polytope; this package does not implement that. For Sycamore and other controlled-phase-type gates, three exact facts bound the count:
+For any other fixed FSim the count comes from the exact n-gate regions in the next subsection. For Sycamore and other controlled-phase-type gates, three facts also bound it by hand:
 
 - One gate reaches only its own class, and the best fidelity with zero or one gate has a closed form (`class_fidelity`).
 - Two controlled-phase gates FSim(0, φ), or two gates FSim(π/2, φ), reach only the face z = 0. FSim(π/2, φ) is SWAP times a controlled phase, and SWAP² = 1, so two such gates act like two controlled phases. For those tr γ(U) is real, which is the Shende–Markov–Bullock condition for two CNOTs.
 - Controlled-phase strengths add. For |φ| ≤ π, FSim(0, φ) has strength s = |φ|/4, and FSim(π/2, φ) carries a controlled phase of strength s = π/4 − |φ|/4 besides the SWAP (5π/24 for Sycamore). n controlled phases, with any single-qubit gates between them, reach only x + y + |z| ≤ n·s. With an odd number of FSim(π/2, φ) a SWAP is left over, and then x + y + |z| ≥ 3π/4 − n·s. The proof goes through the magic-basis spectrum and Thompson's theorem $e^{iA}e^{iB} = e^{i(VAV^\dagger + WBW^\dagger)}$ (Thompson 1986). The tests check both inequalities on random products.
 
-For Sycamore this gives two consequences. Two gates reach only z = 0 with x + y ≤ 5π/12, which excludes iSWAP, so iSWAP needs three. Three gates need x + y + |z| ≥ π/8 ≈ 0.39, so every class with z ≠ 0 and x + y + |z| < π/8 needs four. An example is exp(i(0.1 XX + 0.05 YY + 0.02 ZZ)), whose best three-gate fit has process infidelity 1.6e-2. The bound is tight. Three controlled phases of strength 5π/24 on XX, YY and ZZ give (5π/24)(1, 1, 1), the leftover SWAP maps that to (π/24, π/24, π/24), where the sum is exactly π/8, and the synthesiser reaches that class with three gates (a test checks this). Whether some classes farther out also need four is not settled here. The proven region is small: about 1 in 10⁴ Haar-random unitaries falls in it, and none of the 200 benchmark targets does. Cirq's four-FSim routine uses four gates for every target, and that four is a guarantee. This package uses three where the search finds three, and four otherwise.
+For Sycamore this gives two consequences. Two gates reach only z = 0 with x + y ≤ 5π/12, which excludes iSWAP, so iSWAP needs three. Three gates need x + y + |z| ≥ π/8 ≈ 0.39, so every class with z ≠ 0 and x + y + |z| < π/8 needs four. An example is exp(i(0.1 XX + 0.05 YY + 0.02 ZZ)), whose best three-gate fit has process infidelity 1.6e-2. The bound is tight. Three controlled phases of strength 5π/24 on XX, YY and ZZ give (5π/24)(1, 1, 1), the leftover SWAP maps that to (π/24, π/24, π/24), where the sum is exactly π/8, and the synthesiser reaches that class with three gates (a test checks this). The exact regions below show that no class farther out needs four.
 
-`minimum_count` runs multi-start synthesis upward from the proven lower bound and says how the answer is known: "closed form"; "proven" when it equals the lower bound; or "numerical" when it lies above every proven bound, so that a smaller count is excluded only by the search. In the comparison below every Sycamore minimum is proven. On a drifted coupler (a generic FSim) only the one-gate bound applies, and counts above two are numerical.
+### Exact regions from the monodromy polytope
+
+Peterson, Crooks and Smith (2020) give the condition for a class C to be A·k·B, with A and B fixed and k some layer of single-qubit gates: linear inequalities in the monodromy coordinates of A, B and C (the eigenvalue phases of U (Y⊗Y) Uᵀ (Y⊗Y)), one for each nonzero quantum Littlewood–Richardson coefficient of the Grassmannians Gr(r, 4). The module `monodromy` chains this condition. A target is made by n copies of a native gate exactly when there are n − 2 intermediate classes with every step inside the polytope. Each step lies in one of two convex pieces, so the question is 2ⁿ⁻¹ small linear programs in the intermediate coordinates, which scipy solves. For FSim(0, φ) and FSim(π/2, φ) the regions also have a closed form, which Peterson, Bishop and Javadi-Abhari (2022) derive from the same polytope: n controlled phases of strength s reach x + y + |z| ≤ n·s, −x + y + |z| ≤ (n − 2)·s and |z| ≤ (n − 2)·s, and an odd number of FSim(π/2, φ) leaves a SWAP, which maps (x, y, |z|) to (π/4 − |z|, π/4 − y, π/4 − x). The package uses the closed form for those gates and the linear programs for every other fixed FSim.
+
+Peterson's `monodromy` package implements the polytope with exact rational arithmetic, but it needs the `lrs` program (GPLv2) and is not on PyPI, so this package does not depend on it. The table of 44 coefficients is copied from it (Apache-2.0). The linear programs work in floating point, so a target within about the tolerance of a region's boundary can land on either side, as with the closed forms above.
+
+The tests check the regions against independent results:
+
+- They reproduce the CZ rule (z = 0) and the √iSWAP rule (x − y ≥ |z|) on random classes and on the face z = 0.
+- The closed form and the linear programs agree on five controlled-phase-type gates, for two to four gates.
+- For four generic gates (a drifted Sycamore, the calibrated pair below, FSim(1, 0.4) and FSim(0.6, −1.1)), multi-start synthesis reaches the count the polytope gives and stays above 1e-6 with one gate fewer. The benchmark below repeats this on 10 targets for each of nine native gates, with the same result for all 90.
+- `cirq.decompose_cphase_into_two_fsim` succeeds on three generic gates exactly for the controlled phases CPhase(kπ/8) that the two-gate region contains.
+- FSim(1, 0.4) and its mirror image FSim(1, −0.4) have different regions, and synthesis agrees with the right one.
+
+On Sycamore, s = 5π/24. With the SWAP map, the three inequalities for three gates become x + y + |z| ≥ π/8, x + y − |z| ≥ π/24 and x ≥ π/24. The last two follow from the first, because y and |z| are at most x. So three gates reach exactly the classes with x + y + |z| ≥ π/8, and four reach everything:
+
+| minimum Sycamore count | classes | Haar measure |
+|---|---|---|
+| 0 | local | 0 |
+| 1 | (π/4, π/4, π/24) | 0 |
+| 2 | z = 0 and x + y ≤ 5π/12 | 0 |
+| 3 | every other class with x + y + \|z\| ≥ π/8 | 1 − 1.3746 × 10⁻⁴ |
+| 4 | z ≠ 0 and x + y + \|z\| < π/8 | 1.3746 × 10⁻⁴, about 1 in 7,300 |
+
+The Haar measure is the integral of the Haar density on the Weyl chamber, |Π sin 2(cᵢ + cⱼ) sin 2(cᵢ − cⱼ)| (Watts, O'Connor and Vala 2013), over the region. The same density gives 79.01% for the √iSWAP two-gate region, the figure of Huang et al., and 4 × 10⁶ Haar-random unitaries give 1.39 ± 0.06 × 10⁻⁴ for the four-gate region. Cirq's four-FSim routine uses four gates for every target, and that four is a guarantee. This package uses three on all but that region, and three is the minimum there.
+
+![Haar share of the Sycamore four-gate region, and two-gate shares on drifted couplers](figures/fsim_regions.png)
+
+A drifted coupler is a generic FSim and has none of this structure. FSim(π/2 + δ, φ) and FSim(π/2 − δ, φ) are the same class, so only |δ| matters, and a drift in φ alone leaves the gate a SWAP times a controlled phase. A drift in θ gives the two-gate region volume. Shares of 2,000 Haar-random targets by minimum count, with φ = π/6 (standard error at most 1.1 points):
+
+| \|θ − π/2\| | two gates | three gates | four gates |
+|---|---|---|---|
+| 0 (Sycamore) | 0 | 99.95% | 0.05% |
+| 0.005 | 2.55% | 97.4% | 0.05% |
+| 0.01 | 5.2% | 94.75% | 0.05% |
+| 0.02 | 9.45% | 90.55% | 0 |
+| 0.05 | 24.1% | 75.9% | 0 |
+| 0.1 | 46.1% | 53.9% | 0 |
+| 0.2 | 75.1% | 24.9% | 0 |
+| 0.3 | 90.65% | 9.35% | 0 |
+
+The four-gate entries are one target, the same in each row. Its class is (0.189, 0.177, 0.026), where x + y + |z| is 5 × 10⁻⁴ below π/8. The exact Sycamore share is 0.014%, so one in 2,000 is within chance. Synthesis agrees with the polytope on 10 targets in each row.
+
+On FSim(π/2 + 0.02, π/6 − 0.01) the class (0.1, 0.05, 0.02), which needs four Sycamore gates, needs two, while (0.01, 0.005, 0.002) needs four; synthesis confirms both. Pooled over 20 couplers drawn with the default drift of `SycamoreCalibrationMap` (σθ = 0.02, σφ = 0.015), 6.3% of the targets need two gates, 93.65% three and one four. The 20 couplers have |θ − π/2| of 0.013 on average and 0.054 at most.
+
+The per-pair angles of the supremacy experiment (Arute et al. 2019) are published inside the released circuit files on Dryad, where each pair's calibrated FSim(θ, φ) replaces the nominal π/2 and π/6. Kalai, Rinott and Shoham (2022) quote one of them: θ = 1.2947 and φ = 0.4859 for the pair (3,3)–(3,4). With that gate 88.8% of Haar-random targets need only two gates and the rest three, while CPhase(π/8) and CPhase(π/4) need three. This package does not compile against the full set: the angles of every pair would have to be read from the circuit archives (27 MB and more), which it does not download.
+
+`minimum_count` reads the count off these regions and says how it is known: "closed form" for CZ, √iSWAP, free angles and counts of zero or one, "proven" for counts from the regions. With `method="search"` it runs the multi-start search of earlier versions instead, upward from the lower bounds above, and says "numerical" when the search ends above every bound it can prove by hand.
 
 `predict_stages` combines these into the count where the search starts. On the benchmark below this skips the failing attempts at one stage (free angles) or at one and two stages (CZ, Sycamore). In that run the total time dropped by a factor of 2.7 to 6.7; the factor depends on the targets and on the machine's load, and other runs (the notebook's, for example) give other values.
 
@@ -97,7 +144,7 @@ The targets are CNOT, CZ, iSWAP, √iSWAP, SWAP, CPhase(kπ/8) for k = 1 to 7, a
 | gate set | at the minimum | minimum known by | max process infidelity, ours / Cirq | median ms, ours / Cirq |
 |---|---|---|---|---|
 | free FSim | 100% | closed form | 9e-15 / 1e-15 | 6.4 / 3.6 |
-| Sycamore | 100% | proof (lower bound met) | 9e-15 / 2e-15 | 8.3 / 7.9 (cirq_google), 2.7 (core) |
+| Sycamore | 100% | exact regions | 9e-15 / 2e-15 | 8.3 / 7.9 (cirq_google), 2.7 (core) |
 | √iSWAP | 100% | closed form | 1e-12 / 2e-15 | 11 / 0.7 |
 | CZ | 100% | closed form | 6e-15 / 1e-15 | 7.8 / 1.4 |
 
@@ -129,9 +176,8 @@ Where this package does better:
 Where it does worse:
 
 - Speed. Per two-qubit target, Cirq's analytic routines take 0.7 to 3.6 ms (median by gate set) and this package 6.4 to 11 ms; `cirq_google` takes 7.9 ms. For whole circuits the medians are 20 to 27 ms in exact mode and 35 to 83 ms in noise-aware mode, against 13 to 15 ms for Cirq and 20 ms for `cirq_google`.
-- Guarantees on Sycamore. Cirq's four-FSim routine uses four gates for every target, and that is guaranteed. This package's three is found by search. The search has the four-FSim routine as a fallback at four gates, and a result that misses the tolerance issues a `SynthesisWarning` (or raises `SynthesisError` with `on_failure="raise"`); none did in this benchmark.
+- Guarantees on Sycamore. Cirq's four-FSim routine uses four gates for every target, and that is guaranteed. This package's count is the proven minimum, but the decomposition at that count is found by search. The search has the four-FSim routine as a fallback at four gates, and a result that misses the tolerance issues a `SynthesisWarning` (or raises `SynthesisError` with `on_failure="raise"`); none did in this benchmark.
 - Exactness. Results are converged to a tolerance (here 1e-9; the worst case reached 1e-12), not to machine precision.
-- Proof of minimality. On Sycamore every count in this benchmark meets a proven lower bound. On a drifted coupler (a generic FSim) only the one-gate bound applies, and a count above two is the smallest the search found, not a proven minimum.
 - On CZ and √iSWAP there is no count advantage.
 
 ## Noise-aware synthesis
@@ -220,7 +266,8 @@ Anything else, such as control flow, raises `QasmParseError` with a line number.
 | `unitary_ansatz` | FSim and Euler-angle matrices, Haar-random unitaries, the decomposition template |
 | `riemannian_optimizer` | `DifferentiableFSimSynthesizer` (Euclidean or Riemannian, exact or noise-aware), `synthesize_unitary_to_fsim`, `SynthesisWarning`, `SynthesisError` |
 | `riemannian_manifold` | Cayley retraction and the Riemannian solver |
-| `weyl` | Weyl coordinates, closed-form minimum counts, closed-form class fidelity, controlled-phase strengths and the lower bounds they give, `predict_stages`, `minimum_count`, `numerical_min_count` |
+| `weyl` | Weyl coordinates, closed-form minimum counts, closed-form class fidelity, controlled-phase strengths and the lower bounds they give, `n_gate_region_contains`, `predict_stages`, `minimum_count`, `numerical_min_count`, `haar_density` |
+| `monodromy` | Monodromy coordinates, the monodromy-polytope inequalities, n-gate regions by linear programming, the closed-form controlled-phase regions |
 | `calibration_map` | Coupler calibrations for Sycamore, √iSWAP and CZ with published gate errors, and a per-edge map with drift |
 | `cirq_transformer` | `compile_to_fsim`, `FSimDecomposerTransformer` (consolidation, routing, caching, noise-aware blocks, `infidelity_bound`) |
 | `compare` | Cirq baselines, the circuit suite, the two-qubit and circuit comparisons, the noise-aware study, Cirq's tabulation route, compact results |
@@ -283,10 +330,11 @@ cirq-fsim toffoli --qasm-out toffoli.qasm
 ```bash
 pip install -e ".[dev]"                       # add ",figures" for matplotlib
 pip install cirq-google                       # optional: the cirq_google Sycamore baseline
-pytest tests/                                 # 118 tests, about 30 s
-pytest tests/ -m "not slow"                   # skips the six tests that take more than about 1.5 s
+pytest tests/                                 # 144 tests, about 4 minutes on a busy laptop
+pytest tests/ -m "not slow"                   # skips the 11 tests that take more than about 1.5 s
 python benchmarks/compare_with_cirq.py        # about six minutes
-python benchmarks/make_figures.py             # reads benchmarks/results/compare_with_cirq.json
+python benchmarks/fsim_regions.py             # about ten minutes
+python benchmarks/make_figures.py             # reads both result files in benchmarks/results/
 ```
 
 Without `cirq-google` the comparison runs without the `cirq_google` columns.

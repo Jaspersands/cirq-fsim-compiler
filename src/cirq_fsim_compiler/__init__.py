@@ -3,8 +3,9 @@ cirq_fsim_compiler
 ==================
 Numerical synthesis of two-qubit unitaries into FSim gates, with free angles
 or a coupler's calibrated native gate (Sycamore, √iSWAP, CZ); Weyl-chamber
-gate counts; noise-aware approximate synthesis; a Cirq transformer for whole
-circuits; OpenQASM 3 export and import; and a comparison with Cirq's built-in
+gate counts, exact for any fixed FSim through the monodromy polytope;
+noise-aware approximate synthesis; a Cirq transformer for whole circuits;
+OpenQASM 3 export and import; and a comparison with Cirq's built-in
 decompositions.
 """
 
@@ -53,6 +54,8 @@ from .weyl import (
     native_gate_family,
     cphase_strength,
     minimum_count,
+    n_gate_region_contains,
+    haar_density,
 )
 from .toffoli_decomposer import (
     decompose_toffoli_to_sycamore,
@@ -76,7 +79,7 @@ __all__ = [
     "SYCAMORE_GATE_ERROR", "WILLOW_CZ_ERROR", "SQRT_ISWAP_GATE_ERROR",
     "weyl_coordinates", "fsim_weyl_coordinates", "class_fidelity", "min_cz_count", "min_sqrt_iswap_count",
     "min_free_fsim_count", "analytic_min_count", "numerical_min_count", "predict_stages", "native_gate_family",
-    "cphase_strength", "minimum_count",
+    "cphase_strength", "minimum_count", "n_gate_region_contains", "haar_density",
     "decompose_toffoli_to_sycamore", "decompose_fredkin_to_sycamore", "decompose_ccz_to_sycamore", "decompose_qft3_to_sycamore",
     "toffoli_circuit", "qft_unitary",
     "export_to_openqasm3", "parse_openqasm3",
